@@ -1,7 +1,6 @@
 #pragma once
 #include <HardwareSerial.h>
 #include <map>
-#include <String>
 
 class VEDirectSensor {
 private:
