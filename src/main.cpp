@@ -1,13 +1,13 @@
 #include <esp_system.h>
 #include <esp_log.h>
 #include <Arduino.h>
+#include <optional>
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <time.h>
 #include <FS.h>
 #include <SD.h>
 #include <RTClib.h>
-#include <DHTesp.h>
 #include <ESP32Ping.h>
 #include <InfluxDbClient.h>
 #include <InfluxDbCloud.h>
@@ -16,11 +16,19 @@
 #include "configuration.h"
 // #include "dev_configuration.h"
 #include "mappings.h"
+#include "logger.h"
+#include "DHTSensor.h"
+#include "NTCSensor.h"
 
 InfluxDBClient influxClient(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_DATA_BUCKET, INFLUXDB_TOKEN, InfluxDbCloud2CACert);
 InfluxDBClient influxLogClient(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_LOG_BUCKET, INFLUXDB_TOKEN, InfluxDbCloud2CACert);
 Point sensor("solar_status");
 
+DHTSensor dhtSensor(DHT_PIN);
+NTCSensor ntcSensor1(NTC_POWER_PIN, NTC1_READ_PIN);
+NTCSensor ntcSensor2(NTC_POWER_PIN, NTC2_READ_PIN);
+
+/*
 // Define stuff for the NTC
 const int nominal_resistance = 10000; // Nominal resistance at 25⁰C
 const int nominal_temperature = 25;   // temperature for nominal resistance (almost always 25⁰ C)
@@ -28,30 +36,29 @@ const int samplingrate = 5;           // Number of samples
 const int beta = 3950;                // The beta coefficient or the B value of the thermistor (usually 3000-4000) check the datasheet for the accurate value.
 const int Rref = 9860;                // Value of  resistor used for the voltage divider (measured)
 const float measuredOffset = 5.82;    // Measured offset compared to DHT11 sensor
+*/
 
 uint32_t lastUpdate = millis();
-uint32_t lastTempReading = millis();
+// uint32_t lastTempReading = millis();
 uint32_t lastInverterPowerChange = millis();
 
 tm timeinfo;
 time_t now;
-
-DHTesp dht;
 
 bool sdInserted;
 int inverterOn = 1;
 
 struct greenhouseSensorData
 {
-    int16_t outdoorTemp;
-    int16_t indoorTemp;
-    int16_t soilTemp1;
-    int16_t soilTemp2;
-    uint16_t indoorHumidity;
-    uint16_t soilMoisture1;
-    uint16_t soilMoisture2;
-    uint16_t batteryVoltage;
-    uint8_t checksum;
+  int16_t outdoorTemp;
+  int16_t indoorTemp;
+  int16_t soilTemp1;
+  int16_t soilTemp2;
+  uint16_t indoorHumidity;
+  uint16_t soilMoisture1;
+  uint16_t soilMoisture2;
+  uint16_t batteryVoltage;
+  uint8_t checksum;
 };
 
 std::map<String, int> dataMap; // Map to store data from all sources
@@ -59,7 +66,7 @@ std::map<String, int> dataMap; // Map to store data from all sources
 void logEvent(const String, const String);
 bool logEventToFile(const char *, const String, const String);
 bool logEventToInfluxDB(const char *, const String, const String);
-uint8_t calculateChecksum(const greenhouseSensorData&);
+uint8_t calculateChecksum(const greenhouseSensorData &);
 const char *getResetReason(esp_reset_reason_t);
 void storeDataToNvs(const char *, const char *);
 String readDataFromNvs(const char *);
@@ -94,8 +101,8 @@ void setup()
   Serial.println(" System is starting ");
   Serial.println("====================");
 
-  pinMode(NTC_POWER_PIN, OUTPUT);
-  pinMode(NTC1_READ_PIN, INPUT);
+  // pinMode(NTC_POWER_PIN, OUTPUT);
+  // pinMode(NTC1_READ_PIN, INPUT);
   pinMode(RELAY1, OUTPUT);
   pinMode(RELAY2, OUTPUT);
   pinMode(RELAY3, OUTPUT);
@@ -106,7 +113,7 @@ void setup()
   initWiFi();
   timeSync(TIME_ZONE, NTP_SERVER1, NTP_SERVER2, NTP_SERVER3);
   checkInfluxDbConnection();
-  dht.setup(DHT_PIN, DHTesp::DHT11);
+  //  dht.setup(DHT_PIN, DHTesp::DHT11);
 
   esp_reset_reason_t resetReason = esp_reset_reason();
 
@@ -149,7 +156,7 @@ void initSd() // Initialize SD card
 
   if (!SD.begin())
   {
-    logEvent("Couldn't mount SD card");
+    logEvent("Could not mount SD card", "ERROR");
     return;
   }
 
@@ -232,16 +239,17 @@ bool logEventToInfluxDB(const char *logTimeStamp, const String messageText, cons
   return false;
 }
 
-uint8_t calculateChecksum(const greenhouseSensorData& data)
+uint8_t calculateChecksum(const greenhouseSensorData &data)
 {
-    const uint8_t* bytes = reinterpret_cast<const uint8_t*>(&data);
-    uint8_t sum = 0;
-    
-    // Exclude the checksum field itself from calculation
-    for (size_t i = 0; i < sizeof(greenhouseSensorData) - sizeof(data.checksum); ++i) {
-        sum ^= bytes[i];
-    }
-    return sum;
+  const uint8_t *bytes = reinterpret_cast<const uint8_t *>(&data);
+  uint8_t sum = 0;
+
+  // Exclude the checksum field itself from calculation
+  for (size_t i = 0; i < sizeof(greenhouseSensorData) - sizeof(data.checksum); ++i)
+  {
+    sum ^= bytes[i];
+  }
+  return sum;
 }
 
 const char *getResetReason(esp_reset_reason_t reason)
@@ -278,7 +286,8 @@ const char *getResetReason(esp_reset_reason_t reason)
 
 void storeDataToNvs(const char *key, const char *value)
 {
-  if (!debugModeEnabled) return;
+  if (!debugModeEnabled)
+    return;
   nvs_handle_t stateLoggingHandle;
   esp_err_t err = nvs_open("storage", NVS_READWRITE, &stateLoggingHandle);
   if (err == ESP_OK)
@@ -435,11 +444,9 @@ bool populateDataMap()
 
   veDirectGetData(Serial1, "INV"); // Get message from Phoenix inverter
 
-  yield();
   veDirectGetData(Serial2, "MPPT"); // Get message from SmartSolar MPPT
-  yield();
+
   getTempHumid(); // Get temperature and humidity from DHT and NTC sensors
-  yield();
 
   return true;
 }
@@ -549,101 +556,32 @@ void veDirectStoreMessage(String message, String prefix)
 void getTempHumid() // Collect temperature and humidity and save to 'dataMap'
 {
   storeDataToNvs("lastState", "getTempHumid");
-  int dhtDelay = dht.getMinimumSamplingPeriod() - (millis() - lastTempReading);
-  if (dhtDelay > 0) // Make sure it's been at least MinimumSamplingPeriod since last measurement
-  {
-    logEvent("Waiting for DHT sensor to calm down.", "INFO");
-    delay(dhtDelay);
-  }
 
-  float humidity = dht.getHumidity();
-  Serial.print("DHT humidity: ");
-  Serial.println(humidity);
-  if (humidity < 300) // Ignore coco-bananas values
-  {
-    dataMap["ENV_ROOM_HUMID"] = humidity;
-  }
-  else
-  {
-    logEvent("Ignored unreasonable humidity value from DHT sensor", "WARNING");
-  }
+  // DHT Sensor
+  if (auto temp = dhtSensor.temperature(); temp.has_value())
+    dataMap["ENV_ROOM_TEMP"] = *temp;
 
-  float dhtTemperature = dht.getTemperature();
-  Serial.print("DHT temperature: ");
-  Serial.println(dhtTemperature);
-  if (dhtTemperature < 300)
-  {
-    dataMap["ENV_ROOM_TEMP"] = dhtTemperature;
-  }
-  else
-  {
-    logEvent("Ignored unreasonable temperature value from DHT sensor", "WARNING");
-  }
+  if (auto humidity = dhtSensor.humidity(); humidity.has_value())
+    dataMap["ENV_ROOM_HUMID"] = *humidity;
 
-  int ntcTemperature = getNtcTemp(NTC1_READ_PIN);
-  Serial.print("NTC temperature 1: ");
-  Serial.println(ntcTemperature);
-  if (ntcTemperature > -200)
-  {
-    dataMap["ENV_REFRIG_TEMP"] = ntcTemperature;
-  }
-  else
-  {
-    logEvent("Ignored unreasonable temperature value from NTC 1", "WARNING");
-  }
-  lastTempReading = millis();
+  // NTC sensors
+  if (auto temperature = ntcSensor1.temperature(); temperature.has_value())
+    dataMap["ENV_REFRIG_TEMP"] = *temperature;
 
-  ntcTemperature = getNtcTemp(NTC2_READ_PIN);
-  Serial.print("NTC temperature 2: ");
-  Serial.println(ntcTemperature);
-  if (ntcTemperature > -200)
-  {
-    dataMap["ENV_FREEZER_TEMP"] = ntcTemperature;
-  }
-  else
-  {
-    logEvent("Ignored unreasonable temperature value from NTC 2", "WARNING");
-  }
-  lastTempReading = millis();
-}
+  if (auto temperature = ntcSensor2.temperature(); temperature.has_value())
+    dataMap["ENV_REFRIG_TEMP"] = *temperature;
 
-int getNtcTemp(int READ_PIN = NTC1_READ_PIN) // Get temperature from NTC sensor
-{
-  storeDataToNvs("lastState", "getNtcTemp");
-  int samples = 0;
-  digitalWrite(NTC_POWER_PIN, HIGH);         // Turn voltage on
-  for (uint8_t i = 0; i < samplingrate; i++) // Sum 'samplingrate' numbers of voltage samples
-  {
-    delay(10);
-    samples += analogRead(READ_PIN);
-  }
-  digitalWrite(NTC_POWER_PIN, LOW); // Turn voltage off
-
-  // Calculate average ADC value
-  float average = 0;
-  average = samples / samplingrate;
-
-  // Calculate NTC resistance
-  average = (4095 / average) - 1.0;
-  average = Rref / average;
-
-  // Have Steinhart calculate the temperature for us
-  float temperature;
-  temperature = average / nominal_resistance;
-  temperature = log(temperature);
-  temperature /= beta;
-  temperature += 1.0 / (nominal_temperature + 273.15);
-  temperature = 1.0 / temperature;
-  temperature -= 273.15;            // convert from K to C
-  temperature -= measuredOffset;    // adjust for known offset (at 23°C)
-  temperature = round(temperature); // Round to int, sensor not that exact anyway
-  return temperature;
+  Serial.println("Read the following sensor values: ");
+  Serial.printf("Room humidity:            %d %RH", dataMap["ENV_ROOM_HUMID"]);
+  Serial.printf("Room temperature:         %d °C", dataMap["ENV_ROOM_TEMP"]);
+  Serial.printf("Refrigurator temperature: %d °C", dataMap["ENV_REFRIG_TEMP"]);
+  Serial.printf("Freezer temperature:      %d °C", dataMap["ENV_FREEZER_TEMP"]);
 }
 
 
 void controlInverterByVoltage()
 {
-  const int voltage = dataMap["VE_MPPT_V"];  // Battery voltage in mV. Using MPPT voltage, since Inv. voltage = 0 when off
+  const int voltage = dataMap["VE_MPPT_V"]; // Battery voltage in mV. Using MPPT voltage, since Inv. voltage = 0 when off
 
   // If state changed more recent than retry period, do nothing
   if (millis() - lastInverterPowerChange < (INV_RETRY_PERIOD * 1000))
