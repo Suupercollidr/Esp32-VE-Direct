@@ -1,3 +1,24 @@
+/**
+ * @file SunTimes.h
+ * @author your name (you@domain.com)
+ * @brief Retrieves the time for sunrise and sunet 
+ * for a specific longitude, latitude, and time zone 
+ * and returns the number of minutes since the sun rose or set, 
+ * with negative values if the sun has not yet risen or set. 
+ * 
+ * @param lat Latitude in decimal degrees (example: 59.3293)
+ * @param lon Longitude in decimal degrees (example: 18.0686)
+ * @param tzid IANA timezone (example: "Europe/Stockholm")
+ * 
+ * @example
+ * SunTimes sun(59.3293, 18.0686, "Europe/Stockholm");
+ * sun.updateSunTimes();
+ * int16_t minutes = sun.minutesSinceSunset();
+ * @version 0.1
+ * @date 2025-11-25
+ * 
+ */
+
 #pragma once
 #include <WiFi.h>
 #include <HTTPClient.h>

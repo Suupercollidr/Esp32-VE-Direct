@@ -1,3 +1,15 @@
+/**
+ * @file NTCSensor.h
+ * @brief Calculates the temperature for a NTC sensor
+ * @param powerPin GPIO pin that provides power to the NTC sensor
+ * @param readPin GPIO pin where we read the resistance of the NTC sensor
+ * 
+ * 
+ * @version 0.1
+ * @date 2025-11-25
+ * 
+ */
+
 #pragma once
 #include <Arduino.h> // For pinMode, digitalWrite, analogRead
 #include <optional>

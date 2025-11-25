@@ -1,3 +1,10 @@
+/**
+ * @file logger.h
+ * @brief Logs events to InfluxDB and to a CSV file on the SD card  
+ * @version 0.1
+ * @date 2025-11-25
+ * 
+ */
 #pragma once
 #include <InfluxDbClient.h>
 #include <InfluxDbCloud.h>

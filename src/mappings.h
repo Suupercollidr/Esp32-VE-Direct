@@ -1,3 +1,11 @@
+/**
+ * @file mappings.h
+ * @brief Map value labels and message codes to human-readable information
+ * @version 0.1
+ * @date 2025-11-25
+ * 
+ * 
+ */
 #pragma once
 #include <Arduino.h>
 #include <map>
