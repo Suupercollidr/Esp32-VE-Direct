@@ -3,8 +3,8 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
-.src/configuration.h
-.src/dev_configuration.h
+src/configuration.h
+src/dev_configuration.h
 
 
 # PlatformIO
