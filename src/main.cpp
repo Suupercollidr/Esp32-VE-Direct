@@ -11,82 +11,42 @@
 #include <ESP32Ping.h>
 #include <InfluxDbClient.h>
 #include <InfluxDbCloud.h>
+#include <DHTesp.h>
 #include "nvs_flash.h"
 #include "nvs.h"
-#include "configuration.h"
-// #include "dev_configuration.h"
+// #include "configuration.h"
+#include "dev_configuration.h"
 #include "mappings.h"
 #include "logger.h"
-#include "DHTSensor.h"
 #include "NTCSensor.h"
+#include "VEDirectData.h"
+#include "GreenhouseData.h"
 
 InfluxDBClient influxClient(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_DATA_BUCKET, INFLUXDB_TOKEN, InfluxDbCloud2CACert);
 InfluxDBClient influxLogClient(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_LOG_BUCKET, INFLUXDB_TOKEN, InfluxDbCloud2CACert);
 Point sensor("solar_status");
 
-DHTSensor dhtSensor(DHT_PIN);
+DHTesp dhtSensorRoom;
 NTCSensor ntcSensor1(NTC_POWER_PIN, NTC1_READ_PIN);
 NTCSensor ntcSensor2(NTC_POWER_PIN, NTC2_READ_PIN);
 
-/*
-// Define stuff for the NTC
-const int nominal_resistance = 10000; // Nominal resistance at 25⁰C
-const int nominal_temperature = 25;   // temperature for nominal resistance (almost always 25⁰ C)
-const int samplingrate = 5;           // Number of samples
-const int beta = 3950;                // The beta coefficient or the B value of the thermistor (usually 3000-4000) check the datasheet for the accurate value.
-const int Rref = 9860;                // Value of  resistor used for the voltage divider (measured)
-const float measuredOffset = 5.82;    // Measured offset compared to DHT11 sensor
-*/
+VEDirectSerial victronInverter(Serial1, "INV");
+VEDirectSerial victronMppt(Serial2, "MPPT");
+
 
 uint32_t lastUpdate = millis();
-// uint32_t lastTempReading = millis();
 uint32_t lastInverterPowerChange = millis();
 
 tm timeinfo;
 time_t now;
 
-bool sdInserted;
+bool sdInserted;  // TODO: Scrap SD code
 int inverterOn = 1;
 
-struct greenhouseSensorData
-{
-  int16_t outdoorTemp;
-  int16_t indoorTemp;
-  int16_t soilTemp1;
-  int16_t soilTemp2;
-  uint16_t indoorHumidity;
-  uint16_t soilMoisture1;
-  uint16_t soilMoisture2;
-  uint16_t batteryVoltage;
-  uint8_t checksum;
-};
+std::map<String, SensorValue> sensorData;
 
 std::map<String, int> dataMap; // Map to store data from all sources
 
-void logEvent(const String, const String);
-bool logEventToFile(const char *, const String, const String);
-bool logEventToInfluxDB(const char *, const String, const String);
-uint8_t calculateChecksum(const greenhouseSensorData &);
-const char *getResetReason(esp_reset_reason_t);
-void storeDataToNvs(const char *, const char *);
-String readDataFromNvs(const char *);
-bool populateDataMap();
-void initSd();
-void initWiFi();
-bool checkInfluxDbConnection();
-void sendToInfluxDB();
-void appendDataToFile(const String);
-String veDirectGetFromSerial(HardwareSerial &serial);
-String veDirectTrimMessage(String);
-void veDirectGetData(HardwareSerial &serial, const String &prefix);
-bool veDirectCalcChecksum(String);
-void veDirectStoreMessage(String, String);
-int getNtcTemp(int READ_PIN);
-void getTempHumid();
-greenhouseSensorData getGreenhouseData();
-String convertMessageCode(String label, int code);
-// std::vector<int> findCombination(const std::vector<int> &series, int code);
-void controlInverterByVoltage();
 
 void setup()
 {
@@ -101,8 +61,6 @@ void setup()
   Serial.println(" System is starting ");
   Serial.println("====================");
 
-  // pinMode(NTC_POWER_PIN, OUTPUT);
-  // pinMode(NTC1_READ_PIN, INPUT);
   pinMode(RELAY1, OUTPUT);
   pinMode(RELAY2, OUTPUT);
   pinMode(RELAY3, OUTPUT);
@@ -113,7 +71,8 @@ void setup()
   initWiFi();
   timeSync(TIME_ZONE, NTP_SERVER1, NTP_SERVER2, NTP_SERVER3);
   checkInfluxDbConnection();
-  //  dht.setup(DHT_PIN, DHTesp::DHT11);
+
+  dhtSensorRoom.setup(DHT_PIN, DHTesp::DHT11);
 
   esp_reset_reason_t resetReason = esp_reset_reason();
 
@@ -131,7 +90,7 @@ void loop()
 
   if (millis() >= lastUpdate + (UPDATE_INTERVAL * 1000))
   {
-    populateDataMap();
+    collectSensorData();
     // appendDataToFile(dataFileName);  // Skip writing to file for now, see if that helps uptimes
     controlInverterByVoltage();
     sendToInfluxDB();
@@ -239,50 +198,6 @@ bool logEventToInfluxDB(const char *logTimeStamp, const String messageText, cons
   return false;
 }
 
-uint8_t calculateChecksum(const greenhouseSensorData &data)
-{
-  const uint8_t *bytes = reinterpret_cast<const uint8_t *>(&data);
-  uint8_t sum = 0;
-
-  // Exclude the checksum field itself from calculation
-  for (size_t i = 0; i < sizeof(greenhouseSensorData) - sizeof(data.checksum); ++i)
-  {
-    sum ^= bytes[i];
-  }
-  return sum;
-}
-
-const char *getResetReason(esp_reset_reason_t reason)
-{
-  storeDataToNvs("lastState", "getResetReason");
-  switch (reason)
-  {
-  case ESP_RST_UNKNOWN:
-    return "Unknown";
-  case ESP_RST_POWERON:
-    return "Power on";
-  case ESP_RST_EXT:
-    return "External reset";
-  case ESP_RST_SW:
-    return "Software reset";
-  case ESP_RST_PANIC:
-    return "Software panic";
-  case ESP_RST_INT_WDT:
-    return "Interrupt watchdog";
-  case ESP_RST_TASK_WDT:
-    return "Task watchdog";
-  case ESP_RST_WDT:
-    return "Other watchdogs";
-  case ESP_RST_DEEPSLEEP:
-    return "Deep sleep";
-  case ESP_RST_BROWNOUT:
-    return "Brownout";
-  case ESP_RST_SDIO:
-    return "SDIO";
-  default:
-    return "Not a valid reset reason";
-  }
-}
 
 void storeDataToNvs(const char *key, const char *value)
 {
@@ -328,7 +243,7 @@ bool checkInfluxDbConnection()
   }
 }
 
-void sendToInfluxDB()
+void sendToInfluxDB()   // TODO: Update to use sensorData instead of dataMap
 {
   storeDataToNvs("lastState", "sendToInfluxDB");
   Point dataPoint("SolarPower");
@@ -336,7 +251,7 @@ void sendToInfluxDB()
   for (auto const &entry : dataMap) // Go through all values in dataMap
   {
     String label = entry.first;
-    float value = entry.second;
+    float value = entry.second; 
 
     if (labelMapping.count(label) > 0) // Only send values if they exist in 'labelMapping'
     {
@@ -421,163 +336,70 @@ void appendDataToFile(const String fileName)
   delay(10); // Just give the file time to be saved before we get up to any other shenannigans
 }
 
-bool populateDataMap()
+bool collectSensorData()
 {
-  storeDataToNvs("lastState", "populateDataMap");
-  dataMap.clear(); // Reset data map
+  storeDataToNvs("lastState", "collectSensorData");
+  sensorData.clear();
 
-  time(&now); // Get current time
-  char currentDate[11];
-  char currentTime[9];
-  strftime(currentDate, 11, "%Y-%m-%d", localtime(&now));
-  strftime(currentTime, 9, "%H:%M:%S", localtime(&now));
-  struct tm *timeinfo = localtime(&now);
-  int currentHour = timeinfo->tm_hour;
-  dataMap["TIMESTAMP"] = now;
+  // Current time
+  time(&now);
+  char strTimestamp[20];
+  strftime(strTimestamp, sizeof(strTimestamp), "%Y-%m-%d %H:%M:%S", localtime(&now));
+  sensorData["TIMESTAMP"].strValue = strTimestamp;
+  sensorData["TIMESTAMP"].isNumeric = true;
+  sensorData["TIMESTAMP"].intValue = now;
 
-  dataMap["ESP_UPTIME"] = millis();
-  dataMap["ESP_MEM_FREE"] = ESP.getFreeHeap();
-  dataMap["ESP_MEM_LOWEST"] = ESP.getMinFreeHeap();
-  dataMap["ESP_PSRAM_FREE"] = ESP.getFreePsram();
-  dataMap["ESP_PSRAM_LOWEST"] = ESP.getFreePsram();
-  dataMap["CTRL_INV_ON"] = inverterOn;
+  // ESP statistics and performance
+  sensorData["ESP_UPTIME"].isNumeric = true;
+  sensorData["ESP_UPTIME"].intValue = millis();
+  sensorData["ESP_MEM_FREE"].isNumeric = true;
+  sensorData["ESP_MEM_FREE"].intValue = ESP.getFreeHeap();
+  sensorData["ESP_MEM_LOWEST"].isNumeric = true;
+  sensorData["ESP_MEM_LOWEST"].intValue = ESP.getMinFreeHeap();
+  sensorData["ESP_PSRAM_FREE"].isNumeric = true;
+  sensorData["ESP_PSRAM_FREE"].intValue = ESP.getFreePsram();
+  sensorData["ESP_PSRAM_LOWEST"].isNumeric = true;
+  sensorData["ESP_PSRAM_LOWEST"].intValue = ESP.getFreePsram();
 
-  veDirectGetData(Serial1, "INV"); // Get message from Phoenix inverter
+  // States
+  sensorData["CTRL_INV_ON"].strValue = inverterOn;
 
-  veDirectGetData(Serial2, "MPPT"); // Get message from SmartSolar MPPT
+  // Sensor data
+  if (victronInverter.update())
+    mergeSensorMap(victronInverter.getData(), sensorData);
 
-  getTempHumid(); // Get temperature and humidity from DHT and NTC sensors
-
-  return true;
-}
-
-void veDirectGetData(HardwareSerial &serial, const String &prefix = "")
-{
-  storeDataToNvs("lastState", "veDirectGetData");
-  String message;
-  message = veDirectGetFromSerial(serial); // Get what's in the serial buffer
-  message = veDirectTrimMessage(message);  // Make sure message contains exactly one message block
-  if (!veDirectCalcChecksum(message))      // Verify checksum
-  {
-    String eventLogMessage = String("Checksum didn't match\r\nMessage block: \r\n" + message);
-    logEvent(eventLogMessage);
-    return;
-  }
-  veDirectStoreMessage(message, prefix); // Put values into the 'dataMap' variable
-}
-
-String veDirectGetFromSerial(HardwareSerial &serial)
-{
-  storeDataToNvs("lastState", "veDirectStoreMessage");
-  String message;
-  while (serial.available() > 0)
-  {
-    char c = serial.read();
-    message += c;
-    yield();
-  }
-  return message;
-}
-
-String veDirectTrimMessage(String message)
-{
-  storeDataToNvs("lastState", "veDirectTrimMessage");
-  int startOfLastBlock = message.lastIndexOf("\r\nPID");                                   // The latest message is the last occurance of 'PID' in the string
-  int endOfLastBlock = message.lastIndexOf("Checksum") + 10;                               // 10 = number of chars in 'Checksum' + tab + field value
-  if (startOfLastBlock == -1 || endOfLastBlock == -1 || startOfLastBlock > endOfLastBlock) // If we can't find 'PID' or 'Checksum', or if message ends before it begins, something went wrong
-  {
-    String eventLogMessage = String("Serial block missing either \"PID\" or \"Checksum\"\r\nMessage block: \r\n" + message);
-    logEvent(eventLogMessage);
-    return "";
-  }
-  message = message.substring(startOfLastBlock, endOfLastBlock);
-  yield();
-  return message;
-}
-
-bool veDirectCalcChecksum(String message)
-{
-  storeDataToNvs("lastState", "veDirectCalcChecksum");
-  int checksum = 0;
-  for (char c : message)
-  {
-    checksum = (checksum + int(c)) & 256;
-  }
-  if (checksum != 0)
-  {
-    return false;
-  }
-  return true;
-}
-
-void veDirectStoreMessage(String message, String prefix)
-{
-  storeDataToNvs("lastState", "veDirectStoreMessage");
-  String fieldLabel;
-  String fieldValue;
-  bool isFieldValue = false; // Decides if we read field label or field value
-  for (char c : message)
-  {
-    switch (c)
-    {
-    case 0x0D:               // Carriage return means end of field. Finalize and save to dataMap.
-      if (!prefix.isEmpty()) // If a prefix was sent to this function, add it to the field label
-      {
-        fieldLabel = "VE_" + prefix + "_" + fieldLabel;
-      }
-      dataMap[fieldLabel] = fieldValue.toInt(); // Save what we've got
-      fieldLabel.clear();                       // Reset variables
-      fieldValue.clear();
-      isFieldValue = false; // Next char will be label
-      break;
-
-    case 0x0A: // Line feed. Ignore, because we finalized the field after carriage return
-      break;
-
-    case 0x09: // Tab, means end of label, start of value
-      isFieldValue = true;
-      break;
-
-    default:            // Actual data
-      if (isFieldValue) // Add character to value or label
-      {
-        fieldValue += c;
-      }
-      else
-      {
-        fieldLabel += c;
-      }
-      break;
-    }
-    yield();
-  }
-}
-
-void getTempHumid() // Collect temperature and humidity and save to 'dataMap'
-{
-  storeDataToNvs("lastState", "getTempHumid");
-
-  // DHT Sensor
-  if (auto temp = dhtSensor.temperature(); temp.has_value())
-    dataMap["ENV_ROOM_TEMP"] = *temp;
-
-  if (auto humidity = dhtSensor.humidity(); humidity.has_value())
-    dataMap["ENV_ROOM_HUMID"] = *humidity;
+  if (victronMppt.update())
+    mergeSensorMap(victronMppt.getData(), sensorData);
 
   // NTC sensors
   if (auto temperature = ntcSensor1.temperature(); temperature.has_value())
-    dataMap["ENV_REFRIG_TEMP"] = *temperature;
+    setSensorValue("ENV_REFRIG_TEMP", *temperature);
 
   if (auto temperature = ntcSensor2.temperature(); temperature.has_value())
-    dataMap["ENV_REFRIG_TEMP"] = *temperature;
+    setSensorValue("ENV_FREEZER_TEMP", *temperature);
 
-  Serial.println("Read the following sensor values: ");
-  Serial.printf("Room humidity:            %d %RH", dataMap["ENV_ROOM_HUMID"]);
-  Serial.printf("Room temperature:         %d °C", dataMap["ENV_ROOM_TEMP"]);
-  Serial.printf("Refrigurator temperature: %d °C", dataMap["ENV_REFRIG_TEMP"]);
-  Serial.printf("Freezer temperature:      %d °C", dataMap["ENV_FREEZER_TEMP"]);
+  setSensorValue("ENV_ROOM_TEMP", dhtSensorRoom.getTemperature());
+  setSensorValue("ENV_ROOM_HUMID", dhtSensorRoom.getHumidity());
+
+  return true;
 }
 
+void setSensorValue(const String &key, float value)
+{
+  if (isnan(value)) return;
+
+  SensorValue val;
+  val.intValue = round(value);
+  val.isNumeric = true;
+  val.strValue = String(value, 1);
+  sensorData[key] = val;
+}
+
+void mergeSensorMap(const std::map<String, SensorValue> &source, std::map<String, SensorValue> &destination)
+{
+  for (auto [key, val] : source)
+    destination[key] = val;
+}
 
 void controlInverterByVoltage()
 {
@@ -588,7 +410,7 @@ void controlInverterByVoltage()
   {
     return;
   }
-
+  
   // Do nothing on coco-bananas values
   if (voltage < 1000 || voltage > 20000)
   {
@@ -618,6 +440,8 @@ void controlInverterByVoltage()
   }
 }
 
+
+// TODO: Break this out somehow 
 String convertMessageCode(String label, int ReceivedCode) // Recieves a label representing message type and a code representing one or more messages
 {
   storeDataToNvs("lastState", "convertMessageCode");
