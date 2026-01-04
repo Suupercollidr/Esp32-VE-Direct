@@ -118,7 +118,7 @@ void initWiFi() // Connect to WiFi
   while (WiFi.status() != WL_CONNECTED)
   {
     delay(100);
-    yield();
+    
     Serial.print(".");
   }
   Serial.println();
@@ -201,7 +201,7 @@ void sendToInfluxDB()   // TODO: Update to use sensorData instead of dataMap
         break;
       }
     }
-    yield();
+    
   }
 
   const bool influxDbResponse = influxClient.writePoint(dataPoint); // Send data point to InfluxDB
@@ -364,7 +364,7 @@ String convertMessageCode(String label, int ReceivedCode) // Recieves a label re
             ConcatenatedMessage += ", ";
           }
           ConcatenatedMessage += CodeToMessageMappings.at(ThisCode);
-          yield();
+          
         }
         return ConcatenatedMessage;*/
   }
@@ -414,7 +414,7 @@ std::vector<int> findCombination(const std::vector<int> &series, int code)
     {
       dp[i][0] = true;
       // Timeout guard
-      yield();
+      
       if (millis() - startTime > timeOut)
       {
         throw std::runtime_error("Timeout");
@@ -440,7 +440,7 @@ std::vector<int> findCombination(const std::vector<int> &series, int code)
         }
 
         // Timeout guard
-        yield();
+        
         if (millis() - startTime > timeOut)
         {
           throw std::runtime_error("Timeout");
@@ -469,7 +469,7 @@ std::vector<int> findCombination(const std::vector<int> &series, int code)
       }
       i--;
       // Timeout guard
-      yield();
+      
       if (millis() - startTime > timeOut)
       {
         throw std::runtime_error("Timeout");
