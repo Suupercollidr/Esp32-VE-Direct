@@ -1,8 +1,10 @@
 #include "VEDirectDecoder.h"
 #include <algorithm>
+#include "EventLogger.h"
 
-VEDirectDecoder::VEDirectDecoder(EventLogger &logger)
-    : eventLog(logger) {}
+extern EventLogger eventLog;
+
+VEDirectDecoder::VEDirectDecoder() {}
 
 // Registrera en label och dess kod-mapping
 void VEDirectDecoder::setMapping(const String &label, const std::map<int, String> &codeMap)

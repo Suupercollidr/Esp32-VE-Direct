@@ -15,7 +15,7 @@ struct SensorValue {
 
 class VEDirectDecoder {
 public:
-    VEDirectDecoder(EventLogger &logger);
+    VEDirectDecoder();
 
     // Returnerar text för en kod
     String decode(const String &label, int code);
@@ -27,7 +27,6 @@ public:
     void setMapping(const String &label, const std::map<int, String> &codeMap);
 
 private:
-    EventLogger &eventLog;
     std::map<String, std::map<int, String>> labelMappings;
 
     // Iterativ metod för att hitta kombinationer av koder
