@@ -1,4 +1,7 @@
 #include "VEDirectData.h"
+#include "EventLogger.h"
+
+extern EventLogger eventLog;
 
 /**
  * @brief Check if a string represents a valid integer number.
@@ -49,14 +52,6 @@ String VEDirectSerial::getMessageFromSerial()
  * @param message
  * @return String
  */
-/**
- * @brief Extract the last complete VE.Direct message block from a Serial buffer string.
- *
- *        A VE.Direct message block starts with "\r\nPID" and ends with "Checksum" + value.
- *
- * @param message The raw string read from Serial
- * @return String containing only the last complete message block, or empty string if invalid
- */
 String VEDirectSerial::trimMessage(String message)
 {
     int startOfLastBlock = message.lastIndexOf("\r\nPID");
@@ -65,23 +60,13 @@ String VEDirectSerial::trimMessage(String message)
     if (startOfLastBlock == -1 || endOfLastBlock == -1 || startOfLastBlock > endOfLastBlock)
     {
         String logMsg = "Serial block missing either \"PID\" or \"Checksum\"\r\nMessage block:\r\n" + message;
-        // logEvent(logMsg);
+        eventLog.log(logMsg, EventLogger::LogLevel::ERROR);
         return "";
     }
     return message.substring(startOfLastBlock, endOfLastBlock);
 }
 
-/**
- * @brief The statistics are grouped in blocks with a checksum appended. The
- *        last field in a block will always be “Checksum”. The value is a single
- *        byte, and will not necessarily be a printable ASCII character.
- *        The modulo 256 sum of all bytes in a block will equal 0 if there were no
- *        transmission errors. Multiple blocks are sent containing different fields.
- *
- * @param message
- * @return true
- * @return false
- */
+
 /**
  * @brief Calculate and verify the checksum of a VE.Direct message block.
  *
@@ -138,9 +123,7 @@ void VEDirectSerial::storeMessage(String message)
         case 0x0D: // carriage return
 
             if (!prefix.isEmpty()) // If a prefix was sent to this function, add it to the field label
-            {
                 fieldLabel = "VE_" + prefix + "_" + fieldLabel;
-            }
 
             if (fieldLabel.length() > 0)
             {
@@ -191,7 +174,7 @@ bool VEDirectSerial::update()
     if (!calcChecksum(message))
     {
         String logMsg = "Checksum didn't match\r\nMessage block:\r\n" + message;
-        // logEvent(logMsg);
+        eventLog.log(logMsg, EventLogger::LogLevel::ERROR);
         return false;
     }
 

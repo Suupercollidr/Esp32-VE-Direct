@@ -31,11 +31,12 @@ struct SensorValue
 
     // Set default values
     SensorValue() : strValue(""), isNumeric(false), intValue(0) {}
+
 };
 
 class VEDirectSerial
 {
-private:
+    private:
     HardwareSerial &serial;
     String prefix;
     std::map<String, SensorValue> sensorData;
