@@ -47,6 +47,24 @@ std::map<String, SensorValue> sensorData;
 
 std::map<String, int> dataMap; // Map to store data from all sources
 
+void logEvent(const String, const String);
+bool logEventToFile(const char *, const String, const String);
+bool logEventToInfluxDB(const char *, const String, const String);
+bool collectSensorData();
+void mergeSensorMap(const std::map<String, SensorValue> &source, std::map<String, SensorValue> &destination);
+void setSensorValue(const String &key, float value);
+const char *getResetReason(esp_reset_reason_t);
+void storeDataToNvs(const char *, const char *);
+String readDataFromNvs(const char *);
+void initSd();
+void initWiFi();
+bool checkInfluxDbConnection();
+void sendToInfluxDB();
+void appendDataToFile(const String);
+greenhouseSensorData getGreenhouseData();
+String convertMessageCode(String label, int code);
+// std::vector<int> findCombination(const std::vector<int> &series, int code);
+void controlInverterByVoltage();
 
 void setup()
 {
