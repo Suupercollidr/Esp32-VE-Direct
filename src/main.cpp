@@ -39,7 +39,6 @@ uint32_t lastInverterPowerChange = millis();
 tm timeinfo;
 time_t now;
 
-bool sdInserted;  // TODO: Scrap SD code
 int inverterOn = 1;
 
 std::map<String, SensorValue> sensorData;
@@ -47,7 +46,6 @@ std::map<String, SensorValue> sensorData;
 std::map<String, int> dataMap; // Map to store data from all sources
 
 void logEvent(const String, const String);
-bool logEventToFile(const char *, const String, const String);
 bool logEventToInfluxDB(const char *, const String, const String);
 bool collectSensorData();
 void mergeSensorMap(const std::map<String, SensorValue> &source, std::map<String, SensorValue> &destination);
@@ -58,7 +56,6 @@ String readDataFromNvs(const char *);
 void initWiFi();
 bool checkInfluxDbConnection();
 void sendToInfluxDB();
-void appendDataToFile(const String);
 greenhouseSensorData getGreenhouseData();
 String convertMessageCode(String label, int code);
 // std::vector<int> findCombination(const std::vector<int> &series, int code);
@@ -136,10 +133,7 @@ void logEvent(const String messageText, const String messageLevel = "ERROR")
   char logTimeStamp[30];
   strftime(logTimeStamp, 30, "%Y-%m-%d\t%H:%M:%S", localtime(&now));
 
-  bool writtenToFile = false;
   bool sentToInfluxDB = false;
-
-  //  writtenToFile = logEventToFile(logTimeStamp, messageText, messageLevel);  // Skip writing logs to file
 
   if ((WiFi.status() == WL_CONNECTED)) // Send event to InfluxDB, but only if connected
   {
@@ -147,25 +141,7 @@ void logEvent(const String messageText, const String messageLevel = "ERROR")
   }
 
   Serial.print(String(logTimeStamp) + "\t" + messageLevel + "\t" + messageText);
-  //  Serial.print(writtenToFile ? " (written to logfile, " : " (not written to logfile, ");
   Serial.println(sentToInfluxDB ? " sent to Influx DB)" : " not sent to Influx DB)");
-}
-
-bool logEventToFile(const char *logTimeStamp, const String messageText, const String messageLevel = "ERROR")
-{
-  storeDataToNvs("lastState", "logEventToFile");
-  bool saveStatus;
-  File logFile = SD.open(logFileName, FILE_WRITE);
-  logFile.seek(logFile.size()); // Set file pointer to end of file
-  String message = String(logTimeStamp) + "\t" + messageLevel + "\t" + messageText;
-  if (logFile)
-  {
-    logFile.println(message);
-    logFile.flush();
-    logFile.close();
-    return true;
-  }
-  return false;
 }
 
 bool logEventToInfluxDB(const char *logTimeStamp, const String messageText, const String messageLevel = "ERROR")
@@ -276,53 +252,6 @@ void sendToInfluxDB()   // TODO: Update to use sensorData instead of dataMap
     return;
   }
   Serial.println(" sucessful.");
-}
-
-void appendDataToFile(const String fileName)
-{
-  storeDataToNvs("lastState", "appendDataToFile");
-  if (!SD.exists("/") || !sdInserted)
-  {
-    logEvent("Can't write data to file because SD card is not available");
-    return;
-  }
-  bool headers = false;
-  if (!SD.exists(fileName)) // If new file, we must add headers
-  {
-    headers = true;
-    logEvent("Creating new datafile", "INFO");
-  }
-  File dataFile = SD.open(fileName, FILE_WRITE);
-  if (!dataFile)
-  {
-    logEvent("Couldn't open data file");
-  }
-
-  if (headers) // If new file, add headers
-  {
-    for (const auto &entry : labelMapping)
-    { // Loop through list of labels and add the display name to the file
-      dataFile.print(entry.second.displayName);
-      dataFile.print(";");
-      yield();
-    }
-    dataFile.println(); // Add linebreak after headers
-  }
-
-  dataFile.seek(dataFile.size()); // Set file pointer to end of file
-  for (const auto &entry : labelMapping)
-  {
-    if (dataMap.count(entry.first) > 0) // Only print value if exist in dataMap (prevents creating empty value)
-    {
-      dataFile.print(dataMap[entry.first]);
-    }
-    dataFile.print(";");
-    yield();
-  }
-  dataFile.println(); // Add linebreak after complete row
-  Serial.println("Wrote one line of data to file.");
-  dataFile.close();
-  delay(10); // Just give the file time to be saved before we get up to any other shenannigans
 }
 
 bool collectSensorData()
