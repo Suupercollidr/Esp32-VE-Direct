@@ -16,7 +16,7 @@
 // #include "configuration.h"
 #include "dev_configuration.h"
 #include "mappings.h"
-#include "logger.h"
+#include "EventLogger.h"
 #include "NTCSensor.h"
 #include "VEDirectData.h"
 #include "GreenhouseData.h"
@@ -24,6 +24,8 @@
 InfluxDBClient influxClient(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_DATA_BUCKET, INFLUXDB_TOKEN, InfluxDbCloud2CACert);
 InfluxDBClient influxLogClient(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_LOG_BUCKET, INFLUXDB_TOKEN, InfluxDbCloud2CACert);
 Point sensor("solar_status");
+
+EventLogger eventLog(influxLogClient, SD_DET, logFileName);
 
 DHTesp dhtSensorRoom;
 NTCSensor ntcSensor1(NTC_POWER_PIN, NTC1_READ_PIN);
@@ -45,8 +47,6 @@ std::map<String, SensorValue> sensorData;
 
 std::map<String, int> dataMap; // Map to store data from all sources
 
-void logEvent(const String, const String);
-bool logEventToInfluxDB(const char *, const String, const String);
 bool collectSensorData();
 void mergeSensorMap(const std::map<String, SensorValue> &source, std::map<String, SensorValue> &destination);
 void setSensorValue(const String &key, float value);
@@ -77,7 +77,6 @@ void setup()
   pinMode(RELAY1, OUTPUT);
   pinMode(RELAY2, OUTPUT);
   pinMode(RELAY3, OUTPUT);
-  pinMode(SD_DET, INPUT_PULLUP);
 
   initWiFi();
   timeSync(TIME_ZONE, NTP_SERVER1, NTP_SERVER2, NTP_SERVER3);
@@ -88,9 +87,10 @@ void setup()
   esp_reset_reason_t resetReason = esp_reset_reason();
 
   float setupTime = millis() / 1000;
-  logEvent(String("Systemet startat. Uppstarten tog " + String(setupTime) + " s."), "INFO");
-  logEvent(String("Senaste återställning: " + String(getResetReason(resetReason)) + " (" + String(resetReason) + ")"), "INFO");
-  logEvent(String("Senaste åtgärd: " + lastEventBeforeReboot), "INFO");
+  
+  eventLog.log(String("Systemet startat. Uppstarten tog " + String(setupTime) + " s."), EventLogger::LogLevel::INFO);
+  eventLog.log(String("Senaste återställning: " + String(getResetReason(resetReason)) + " (" + String(resetReason) + ")"), EventLogger::LogLevel::INFO);
+  eventLog.log(String("Senaste åtgärd: " + lastEventBeforeReboot), EventLogger::LogLevel::INFO);
 
   storeDataToNvs("lastState", "Setup end");
 }
@@ -113,7 +113,7 @@ void loop()
 void initWiFi() // Connect to WiFi
 {
   storeDataToNvs("lastState", "initWiFi");
-  logEvent(String("Connecting to WiFi " + String(ssid)), "INFO");
+  eventLog.log(String("Connecting to WiFi " + String(ssid)), EventLogger::LogLevel::INFO);
   WiFi.begin(ssid, password, 6);
   while (WiFi.status() != WL_CONNECTED)
   {
@@ -122,47 +122,8 @@ void initWiFi() // Connect to WiFi
     Serial.print(".");
   }
   Serial.println();
-  logEvent(String("Connected to WiFi " + String(ssid)), "INFO");
+  eventLog.log(String("Connected to WiFi " + String(ssid)), EventLogger::LogLevel::INFO);
 }
-
-void logEvent(const String messageText, const String messageLevel = "ERROR")
-{
-  storeDataToNvs("lastState", "logEvent");
-
-  time(&now); // Get current time
-  char logTimeStamp[30];
-  strftime(logTimeStamp, 30, "%Y-%m-%d\t%H:%M:%S", localtime(&now));
-
-  bool sentToInfluxDB = false;
-
-  if ((WiFi.status() == WL_CONNECTED)) // Send event to InfluxDB, but only if connected
-  {
-    sentToInfluxDB = logEventToInfluxDB(logTimeStamp, messageText, messageLevel);
-  }
-
-  Serial.print(String(logTimeStamp) + "\t" + messageLevel + "\t" + messageText);
-  Serial.println(sentToInfluxDB ? " sent to Influx DB)" : " not sent to Influx DB)");
-}
-
-bool logEventToInfluxDB(const char *logTimeStamp, const String messageText, const String messageLevel = "ERROR")
-{
-  storeDataToNvs("lastState", "logEventToInfluxDB");
-  // Create data point for InfluxDB
-  Point logPoint("EventLog");
-  logPoint.addTag("level", messageLevel);
-  logPoint.addField("message", messageText);
-  logPoint.addField("timestamp", logTimeStamp);
-
-  // Send data point to InfluxDB
-  const bool influxDbResponse = influxLogClient.writePoint(logPoint); // Send data point to InfluxDB
-  if (influxDbResponse)
-  {
-    return true;
-  }
-  Serial.println(influxLogClient.getLastErrorMessage());
-  return false;
-}
-
 
 void storeDataToNvs(const char *key, const char *value)
 {
@@ -198,12 +159,12 @@ bool checkInfluxDbConnection()
   storeDataToNvs("lastState", "checkInfluxDbConnection");
   if (influxClient.validateConnection())
   {
-    logEvent(String("Ansluten till Influx DB: " + influxClient.getServerUrl()), "INFO");
+    eventLog.log(String("Ansluten till Influx DB: " + influxClient.getServerUrl()), EventLogger::LogLevel::INFO);
     return true;
   }
   else
   {
-    logEvent(String("Kunde inte ansluta till Influx DB: " + influxClient.getLastErrorMessage()));
+    eventLog.log(String("Kunde inte ansluta till Influx DB: " + influxClient.getLastErrorMessage()));
     return false;
   }
 }
@@ -248,7 +209,7 @@ void sendToInfluxDB()   // TODO: Update to use sensorData instead of dataMap
   if (!influxDbResponse)
   {
     Serial.println(" failed.");
-    logEvent(influxClient.getLastErrorMessage());
+    eventLog.log(influxClient.getLastErrorMessage());
     return;
   }
   Serial.println(" sucessful.");
@@ -333,7 +294,7 @@ void controlInverterByVoltage()
   if (voltage < 1000 || voltage > 20000)
   {
     String messageText = "Orealistikt spänningsvärde (" + String(voltage) + " V), ändrar inte status på inverter";
-    logEvent(messageText, "WARNING");
+    eventLog.log(messageText, EventLogger::LogLevel::WARNING);
     return;
   }
 
@@ -343,7 +304,7 @@ void controlInverterByVoltage()
     digitalWrite(RELAY1, HIGH); // Relay is NC
     lastInverterPowerChange = millis();
     inverterOn = 0;
-    logEvent("Inverter stängdes av, låg batterispänning", "INFO");
+    eventLog.log("Inverter stängdes av, låg batterispänning", EventLogger::LogLevel::INFO);
     return;
   }
 
@@ -353,7 +314,7 @@ void controlInverterByVoltage()
     digitalWrite(RELAY1, LOW); // Relay is NC
     lastInverterPowerChange = millis();
     inverterOn = 1;
-    logEvent("Inverter slogs på, tillräcklig batterispänning ", "INFO");
+    eventLog.log("Inverter slogs på, tillräcklig batterispänning ", EventLogger::LogLevel::INFO);
     return;
   }
 }
@@ -410,22 +371,22 @@ String convertMessageCode(String label, int ReceivedCode) // Recieves a label re
   catch (const std::out_of_range &e) // There is no entry for this label in 'LabelCodeMapping'
   {
     String ErrorMessage = "Hittade inga meddelanden för " + label;
-    logEvent(ErrorMessage);
-    logEvent(e.what());
+    eventLog.log(ErrorMessage);
+    eventLog.log(e.what());
     return ErrorMessage;
   }
   catch (const std::runtime_error &e) // There is an entry, but it is empty
   {
     String ErrorMessage = "Hittade inget meddelanden för kod " + String(ReceivedCode) + " för " + label;
-    logEvent(ErrorMessage);
-    logEvent(e.what());
+    eventLog.log(ErrorMessage);
+    eventLog.log(e.what());
     return ErrorMessage;
   }
   catch (const std::logic_error &e) // Extracted a code that doesn't have an entry
   {
     String ErrorMessage = "Felaktig meddelandekod " + String(ReceivedCode) + " för " + label;
-    logEvent(ErrorMessage);
-    logEvent(e.what());
+    eventLog.log(ErrorMessage);
+    eventLog.log(e.what());
     return ErrorMessage;
   }
 }
@@ -520,13 +481,13 @@ std::vector<int> findCombination(const std::vector<int> &series, int code)
   catch (const std::runtime_error)
   {
     String errorMessage = "Timeout when trying to find combination of error messages. Returns empty vector. ";
-    logEvent(errorMessage, "WARNING");
+    eventLog.log(errorMessage, EventLogger::LogLevel::WARNING);
     return std::vector<int>();
   }
   catch (const std::exception)
   {
     String errorMessage = "Unhandled error when trying to find combination of error messages. Returns empty vector. ";
-    logEvent(errorMessage, "WARNING");
+    eventLog.log(errorMessage, EventLogger::LogLevel::WARNING);
     return std::vector<int>();
 
   }
