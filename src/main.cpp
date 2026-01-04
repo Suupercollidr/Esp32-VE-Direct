@@ -23,7 +23,7 @@
 
 InfluxDBClient influxClient(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_DATA_BUCKET, INFLUXDB_TOKEN, InfluxDbCloud2CACert);
 InfluxDBClient influxLogClient(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_LOG_BUCKET, INFLUXDB_TOKEN, InfluxDbCloud2CACert);
-Point sensor("solar_status");
+Point sensor("solar_status"); // Den här används nog inte
 
 EventLogger eventLog(influxLogClient, SD_DET, logFileName);
 
@@ -286,20 +286,18 @@ void controlInverterByVoltage()
 
   // If state changed more recent than retry period, do nothing
   if (millis() - lastInverterPowerChange < (INV_RETRY_PERIOD * 1000))
-  {
     return;
-  }
   
   // Do nothing on coco-bananas values
   if (voltage < 1000 || voltage > 20000)
   {
-    String messageText = "Orealistikt spänningsvärde (" + String(voltage) + " V), ändrar inte status på inverter";
+    String messageText = "Orealistikt spänningsvärde (" + String(voltage) + " mV), ändrar inte status på inverter";
     eventLog.log(messageText, EventLogger::LogLevel::WARNING);
     return;
   }
 
   // If battery voltage is lower then off voltage, turn inverter off
-  if (voltage < INV_OFF_VOLTAGE)
+  if (inverterOn == 1 && voltage < INV_OFF_VOLTAGE)
   {
     digitalWrite(RELAY1, HIGH); // Relay is NC
     lastInverterPowerChange = millis();
@@ -309,7 +307,7 @@ void controlInverterByVoltage()
   }
 
   // If battery voltage is higher than on voltage, turn inverter on
-  if (voltage > INV_ON_VOLTAGE)
+  if (inverterOn == 0 && voltage > INV_ON_VOLTAGE)
   {
     digitalWrite(RELAY1, LOW); // Relay is NC
     lastInverterPowerChange = millis();
