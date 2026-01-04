@@ -6,7 +6,6 @@
 #include <HTTPClient.h>
 #include <time.h>
 #include <FS.h>
-#include <SD.h>
 #include <RTClib.h>
 #include <ESP32Ping.h>
 #include <InfluxDbClient.h>
@@ -56,7 +55,6 @@ void setSensorValue(const String &key, float value);
 const char *getResetReason(esp_reset_reason_t);
 void storeDataToNvs(const char *, const char *);
 String readDataFromNvs(const char *);
-void initSd();
 void initWiFi();
 bool checkInfluxDbConnection();
 void sendToInfluxDB();
@@ -83,9 +81,7 @@ void setup()
   pinMode(RELAY2, OUTPUT);
   pinMode(RELAY3, OUTPUT);
   pinMode(SD_DET, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(SD_DET), initSd, CHANGE);
 
-  //  initSd();
   initWiFi();
   timeSync(TIME_ZONE, NTP_SERVER1, NTP_SERVER2, NTP_SERVER3);
   checkInfluxDbConnection();
@@ -109,37 +105,12 @@ void loop()
   if (millis() >= lastUpdate + (UPDATE_INTERVAL * 1000))
   {
     collectSensorData();
-    // appendDataToFile(dataFileName);  // Skip writing to file for now, see if that helps uptimes
     controlInverterByVoltage();
     sendToInfluxDB();
     lastUpdate = millis();
   }
   yield();
   delay(10);
-}
-
-void initSd() // Initialize SD card
-{
-  storeDataToNvs("lastState", "initSd");
-  sdInserted = (digitalRead(SD_DET) == LOW); // True if SD card is inserted
-
-  if (!sdInserted)
-  {
-    logEvent("SD card removed", "INFO");
-    return;
-  }
-
-  logEvent("SD card inserted", "INFO");
-
-  if (!SD.begin())
-  {
-    logEvent("Could not mount SD card", "ERROR");
-    return;
-  }
-
-  logEvent("SD card mounted", "INFO");
-  String cardSizeMessage = "SD card size: " + String(SD.cardSize() / (1024 * 1024)) + "MB";
-  logEvent(cardSizeMessage, "INFO");
 }
 
 void initWiFi() // Connect to WiFi
