@@ -1,5 +1,6 @@
 #include "VEDirectData.h"
 #include "EventLogger.h"
+#include "SensorValue.h"
 
 extern EventLogger eventLog;
 

@@ -13,26 +13,13 @@
  *
  * @note The Serial buffer is read as-is. The latest message block is determined by
  *       locating the last occurrence of "\r\nPID" and "Checksum".
- *
- * @version 0.1
- * @date 2025-11-25
  */
 
 #pragma once
 #include <Arduino.h>
 #include <HardwareSerial.h>
 #include <map>
-
-struct SensorValue
-{
-    String strValue;
-    bool isNumeric;
-    int intValue;
-
-    // Set default values
-    SensorValue() : strValue(""), isNumeric(false), intValue(0) {}
-
-};
+#include "SensorValue.h"
 
 class VEDirectSerial
 {

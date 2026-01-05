@@ -2,33 +2,25 @@
 #include <Arduino.h>
 #include <map>
 #include <vector>
+#include "SensorValue.h"
 #include "EventLogger.h"
-#include "mappings.h"
 
-struct SensorValue {
-    String strValue;
-    bool isNumeric;
-    int intValue;
-
-    SensorValue() : strValue(""), isNumeric(false), intValue(0) {}
-};
-
-class VEDirectDecoder {
+class VEDirectDecoder
+{
 public:
-    VEDirectDecoder();
+    using CodeMap  = std::map<int, String>;
+    using LabelMap = std::map<String, CodeMap>;
 
-    // Returnerar text för en kod
-    String decode(const String &label, int code);
+    explicit VEDirectDecoder(const LabelMap &mappings)
+        : mappings(mappings) {}
 
-    // Returnerar SensorValue med strValue och intValue
-    SensorValue decodeToSensorValue(const String &label, int code);
-
-    // Registrera eller uppdatera mappings för en label
-    void setMapping(const String &label, const std::map<int, String> &codeMap);
+    SensorValue decodeToSensorValue(const String &label, int value);
+    std::map<String, SensorValue> decodeMap(const std::map<String, SensorValue> &rawData);
 
 private:
-    std::map<String, std::map<int, String>> labelMappings;
+    LabelMap mappings;
 
-    // Iterativ metod för att hitta kombinationer av koder
-    std::vector<int> findCombination(const std::vector<int> &availableCodes, int code);
+    std::vector<int> findCodes(const String &label, int value);
+    String lookupMessages(const String &label, const std::vector<int> &codes);
+    std::vector<int> findCombination(const std::vector<int> &availableCodes, int value);
 };

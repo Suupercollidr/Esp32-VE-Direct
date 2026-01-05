@@ -19,6 +19,8 @@
 #include "EventLogger.h"
 #include "NTCSensor.h"
 #include "VEDirectData.h"
+#include "VEDirectDecoder.h"
+#include "SensorValue.h"
 #include "GreenhouseData.h"
 
 InfluxDBClient influxClient(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_DATA_BUCKET, INFLUXDB_TOKEN, InfluxDbCloud2CACert);
@@ -33,7 +35,6 @@ NTCSensor ntcSensor2(NTC_POWER_PIN, NTC2_READ_PIN);
 
 VEDirectSerial victronInverter(Serial1, "INV");
 VEDirectSerial victronMppt(Serial2, "MPPT");
-
 
 uint32_t lastUpdate = millis();
 uint32_t lastInverterPowerChange = millis();
@@ -87,7 +88,7 @@ void setup()
   esp_reset_reason_t resetReason = esp_reset_reason();
 
   float setupTime = millis() / 1000;
-  
+
   eventLog.log(String("Systemet startat. Uppstarten tog " + String(setupTime) + " s."), EventLogger::LogLevel::INFO);
   eventLog.log(String("Senaste återställning: " + String(getResetReason(resetReason)) + " (" + String(resetReason) + ")"), EventLogger::LogLevel::INFO);
   eventLog.log(String("Senaste åtgärd: " + lastEventBeforeReboot), EventLogger::LogLevel::INFO);
@@ -102,6 +103,7 @@ void loop()
   if (millis() >= lastUpdate + (UPDATE_INTERVAL * 1000))
   {
     collectSensorData();
+    // getCodeDesc();
     controlInverterByVoltage();
     sendToInfluxDB();
     lastUpdate = millis();
@@ -118,7 +120,7 @@ void initWiFi() // Connect to WiFi
   while (WiFi.status() != WL_CONNECTED)
   {
     delay(100);
-    
+
     Serial.print(".");
   }
   Serial.println();
@@ -169,7 +171,7 @@ bool checkInfluxDbConnection()
   }
 }
 
-void sendToInfluxDB()   // TODO: Update to use sensorData instead of dataMap
+void sendToInfluxDB() // TODO: Update to use sensorData instead of dataMap
 {
   storeDataToNvs("lastState", "sendToInfluxDB");
   Point dataPoint("SolarPower");
@@ -177,7 +179,7 @@ void sendToInfluxDB()   // TODO: Update to use sensorData instead of dataMap
   for (auto const &entry : dataMap) // Go through all values in dataMap
   {
     String label = entry.first;
-    float value = entry.second; 
+    float value = entry.second;
 
     if (labelMapping.count(label) > 0) // Only send values if they exist in 'labelMapping'
     {
@@ -201,7 +203,6 @@ void sendToInfluxDB()   // TODO: Update to use sensorData instead of dataMap
         break;
       }
     }
-    
   }
 
   const bool influxDbResponse = influxClient.writePoint(dataPoint); // Send data point to InfluxDB
@@ -245,10 +246,18 @@ bool collectSensorData()
 
   // Sensor data
   if (victronInverter.update())
-    mergeSensorMap(victronInverter.getData(), sensorData);
+  {
+    VEDirectDecoder inverterDecoder(LabelCodeMapping);
+    std::map<String, SensorValue> decodedData = inverterDecoder.decodeMap(victronInverter.getData());
+    mergeSensorMap(decodedData, sensorData);
+  }
 
   if (victronMppt.update())
-    mergeSensorMap(victronMppt.getData(), sensorData);
+  {
+    VEDirectDecoder mpptDecoder(LabelCodeMapping);
+    std::map<String, SensorValue> decodedData = mpptDecoder.decodeMap(victronMppt.getData());
+    mergeSensorMap(decodedData, sensorData);
+  }
 
   // NTC sensors
   if (auto temperature = ntcSensor1.temperature(); temperature.has_value())
@@ -265,7 +274,8 @@ bool collectSensorData()
 
 void setSensorValue(const String &key, float value)
 {
-  if (isnan(value)) return;
+  if (isnan(value))
+    return;
 
   SensorValue val;
   val.intValue = round(value);
@@ -287,7 +297,7 @@ void controlInverterByVoltage()
   // If state changed more recent than retry period, do nothing
   if (millis() - lastInverterPowerChange < (INV_RETRY_PERIOD * 1000))
     return;
-  
+
   // Do nothing on coco-bananas values
   if (voltage < 1000 || voltage > 20000)
   {
@@ -316,178 +326,3 @@ void controlInverterByVoltage()
     return;
   }
 }
-
-
-// TODO: Break this out somehow 
-String convertMessageCode(String label, int ReceivedCode) // Recieves a label representing message type and a code representing one or more messages
-{
-  storeDataToNvs("lastState", "convertMessageCode");
-  try
-  {
-    const std::map<const int, const String> &CodeToMessageMappings = LabelCodeMapping.at(label); // Get the code-to-message mapping for this 'label'
-    String ConcatenatedMessage;
-
-    if (CodeToMessageMappings.count(ReceivedCode) > 0) // If the message code is an exact match, there is only one message and we can return that
-    {
-      ConcatenatedMessage = CodeToMessageMappings.at(ReceivedCode);
-      return ConcatenatedMessage;
-    }
-
-    // Workaround that ignores the hassle of looking for combinations (because it always crashes)
-    String messageForCobinedMessage = "No match for " + String(ReceivedCode) + ". Might be a combination message.";
-    return (messageForCobinedMessage);
-
-    /*
-        // If no exact match, extract individual messages using maths
-
-        // Gather all codes for this label
-        std::vector<int> AvailableCodes;
-        for (const auto &entry : CodeToMessageMappings)
-        {
-          AvailableCodes.push_back(entry.first);
-        }
-
-        // Get a vector of all codes that are summed to make up 'RecievedCode'
-        std::vector<int> CodesInMessage = findCombination(AvailableCodes, ReceivedCode);
-
-        if (CodesInMessage.empty())
-        {
-          throw std::logic_error("Code recieved from VE.Direct doesn't exactly match message table");
-        }
-
-        for (int ThisCode : CodesInMessage)
-        {
-          if (ConcatenatedMessage != "") // If this is not the first message, add comma and space before
-          {
-            ConcatenatedMessage += ", ";
-          }
-          ConcatenatedMessage += CodeToMessageMappings.at(ThisCode);
-          
-        }
-        return ConcatenatedMessage;*/
-  }
-  catch (const std::out_of_range &e) // There is no entry for this label in 'LabelCodeMapping'
-  {
-    String ErrorMessage = "Hittade inga meddelanden för " + label;
-    eventLog.log(ErrorMessage);
-    eventLog.log(e.what());
-    return ErrorMessage;
-  }
-  catch (const std::runtime_error &e) // There is an entry, but it is empty
-  {
-    String ErrorMessage = "Hittade inget meddelanden för kod " + String(ReceivedCode) + " för " + label;
-    eventLog.log(ErrorMessage);
-    eventLog.log(e.what());
-    return ErrorMessage;
-  }
-  catch (const std::logic_error &e) // Extracted a code that doesn't have an entry
-  {
-    String ErrorMessage = "Felaktig meddelandekod " + String(ReceivedCode) + " för " + label;
-    eventLog.log(ErrorMessage);
-    eventLog.log(e.what());
-    return ErrorMessage;
-  }
-}
-
-/*
-// Function to find the combination of numbers from the series that sum up to the given code
-std::vector<int> findCombination(const std::vector<int> &series, int code)
-{
-  storeDataToNvs("lastState", "findCombination");
-  int32_t startTime = millis();
-  int timeOut = 2 * 1000;
-
-  try
-  {
-    // Get the size of the series
-    int seriesSize = series.size();
-
-    // Initialize a 2D array to store the dynamic programming table
-    std::vector<std::vector<bool>> dp(seriesSize + 1, std::vector<bool>(code + 1, false));
-
-    storeDataToNvs("lastState", "findCombination, about to init first column in table");
-
-    // Initialize the first column of the table
-    for (int i = 0; i <= seriesSize; i++)
-    {
-      dp[i][0] = true;
-      // Timeout guard
-      
-      if (millis() - startTime > timeOut)
-      {
-        throw std::runtime_error("Timeout");
-      }
-    }
-
-    storeDataToNvs("lastState", "findCombination, about to fill dynamic programming table");
-
-    // Fill the dynamic programming table
-    for (int i = 1; i <= seriesSize; i++)
-    {
-      for (int j = 1; j <= code; j++)
-      {
-        // If the current element is greater than the sum, it cannot be included
-        if (series[i - 1] > j)
-        {
-          dp[i][j] = dp[i - 1][j];
-        }
-        // Otherwise, consider including or excluding the current element
-        else
-        {
-          dp[i][j] = dp[i - 1][j] || dp[i - 1][j - series[i - 1]];
-        }
-
-        // Timeout guard
-        
-        if (millis() - startTime > timeOut)
-        {
-          throw std::runtime_error("Timeout");
-        }
-      }
-    }
-
-    // Check if there is a valid combination for the given code
-    if (!dp[seriesSize][code])
-    {
-      // No valid combination found, return an empty vector
-      return std::vector<int>();
-    }
-
-    // Reconstruct the combination from the dynamic programming table
-    std::vector<int> combination;
-    int i = seriesSize;
-    int j = code;
-    while (i > 0 && j > 0)
-    {
-      if (dp[i][j] && !dp[i - 1][j])
-      {
-        // Include the current element in the combination
-        combination.push_back(series[i - 1]);
-        j -= series[i - 1];
-      }
-      i--;
-      // Timeout guard
-      
-      if (millis() - startTime > timeOut)
-      {
-        throw std::runtime_error("Timeout");
-      }
-    }
-
-    return combination;
-  }
-  catch (const std::runtime_error)
-  {
-    String errorMessage = "Timeout when trying to find combination of error messages. Returns empty vector. ";
-    eventLog.log(errorMessage, EventLogger::LogLevel::WARNING);
-    return std::vector<int>();
-  }
-  catch (const std::exception)
-  {
-    String errorMessage = "Unhandled error when trying to find combination of error messages. Returns empty vector. ";
-    eventLog.log(errorMessage, EventLogger::LogLevel::WARNING);
-    return std::vector<int>();
-
-  }
-}
-*/

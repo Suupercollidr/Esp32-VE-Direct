@@ -58,7 +58,7 @@ const std::map<String, labelsAndUnits> labelMapping{
 };
 
 // Map message codes to messages, for various labels
-const std::map<const String, std::map<const int, const String>> LabelCodeMapping{
+const std::map<String, std::map<int, String>> LabelCodeMapping{
     {"CTRL_INV_ON",
      {
          {0, "Av"},
