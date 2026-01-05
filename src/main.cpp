@@ -46,8 +46,6 @@ int inverterOn = 1;
 
 std::map<String, SensorValue> sensorData;
 
-std::map<String, int> dataMap; // Map to store data from all sources
-
 bool collectSensorData();
 void mergeSensorMap(const std::map<String, SensorValue> &source, std::map<String, SensorValue> &destination);
 void setSensorValue(const String &key, float value);
@@ -58,8 +56,6 @@ void initWiFi();
 bool checkInfluxDbConnection();
 void sendToInfluxDB();
 greenhouseSensorData getGreenhouseData();
-String convertMessageCode(String label, int code);
-// std::vector<int> findCombination(const std::vector<int> &series, int code);
 void controlInverterByVoltage();
 
 void setup()
@@ -171,15 +167,16 @@ bool checkInfluxDbConnection()
   }
 }
 
-void sendToInfluxDB() // TODO: Update to use sensorData instead of dataMap
+void sendToInfluxDB()
 {
   storeDataToNvs("lastState", "sendToInfluxDB");
   Point dataPoint("SolarPower");
 
-  for (auto const &entry : dataMap) // Go through all values in dataMap
+  for (auto const &entry : sensorData) // Go through all values in sensorData
   {
     String label = entry.first;
-    float value = entry.second;
+    String strValue = entry.second.strValue;
+    float value = entry.second.intValue;
 
     if (labelMapping.count(label) > 0) // Only send values if they exist in 'labelMapping'
     {
@@ -191,8 +188,7 @@ void sendToInfluxDB() // TODO: Update to use sensorData instead of dataMap
       {
       case 0:
         //  0: Status. Send both int and human-readable message
-        humanReadableMsg = convertMessageCode(label, value);
-        dataPoint.addField(name, humanReadableMsg); // Add human-readable message as a separate field
+        dataPoint.addField(name, strValue);         // Add human-readable message as a separate field
         dataPoint.addField(label, intValue);        // Send original value as int (no float for error codes)
         break;
 
@@ -292,7 +288,7 @@ void mergeSensorMap(const std::map<String, SensorValue> &source, std::map<String
 
 void controlInverterByVoltage()
 {
-  const int voltage = dataMap["VE_MPPT_V"]; // Battery voltage in mV. Using MPPT voltage, since Inv. voltage = 0 when off
+  const int voltage = sensorData["VE_MPPT_V"].intValue; // Battery voltage in mV. Using MPPT voltage, since Inv. voltage = 0 when off
 
   // If state changed more recent than retry period, do nothing
   if (millis() - lastInverterPowerChange < (INV_RETRY_PERIOD * 1000))
