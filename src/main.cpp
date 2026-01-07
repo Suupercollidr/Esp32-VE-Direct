@@ -21,7 +21,7 @@
 #include "VEDirectData.h"
 #include "VEDirectDecoder.h"
 #include "SensorValue.h"
-#include "GreenhouseData.h"
+#include "ReadEspNow.h"
 
 InfluxDBClient influxClient(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_DATA_BUCKET, INFLUXDB_TOKEN, InfluxDbCloud2CACert);
 InfluxDBClient influxLogClient(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_LOG_BUCKET, INFLUXDB_TOKEN, InfluxDbCloud2CACert);
@@ -36,6 +36,8 @@ NTCSensor ntcSensor2(NTC_POWER_PIN, NTC2_READ_PIN);
 VEDirectSerial victronInverter(Serial1, "INV");
 VEDirectSerial victronMppt(Serial2, "MPPT");
 
+ESPNowReceiver greenhouseData;
+
 uint32_t lastUpdate = millis();
 uint32_t lastInverterPowerChange = millis();
 
@@ -45,6 +47,8 @@ time_t now;
 int inverterOn = 1;
 
 std::map<String, SensorValue> sensorData;
+std::map<String, int> numSensorData;
+std::map<String, String> humSensorData;
 
 bool collectSensorData();
 void mergeSensorMap(const std::map<String, SensorValue> &source, std::map<String, SensorValue> &destination);
@@ -54,8 +58,7 @@ void storeDataToNvs(const char *, const char *);
 String readDataFromNvs(const char *);
 void initWiFi();
 bool checkInfluxDbConnection();
-void sendToInfluxDB();
-greenhouseSensorData getGreenhouseData();
+void sendHouseToInflux();
 void controlInverterByVoltage();
 
 void setup()
@@ -96,14 +99,24 @@ void loop()
 {
   storeDataToNvs("lastState", "Loop");
 
+  // Fetch VE.Direct data at regular intervals 
   if (millis() >= lastUpdate + (UPDATE_INTERVAL * 1000))
   {
     collectSensorData();
     // getCodeDesc();
     controlInverterByVoltage();
-    sendToInfluxDB();
+    sendHouseToInflux();
     lastUpdate = millis();
   }
+
+  // Fetch greenhouse data if it has been recieved over ESP-NOW
+  if (greenhouseData.hasNewData())
+  {
+    auto data = greenhouseData.getData();
+    greenhouseData.clearNewDataFlag();
+    //sendGrenhToInflux(data);
+  }
+
   yield();
   delay(10);
 }
@@ -167,9 +180,9 @@ bool checkInfluxDbConnection()
   }
 }
 
-void sendToInfluxDB()
+void sendHouseToInflux()
 {
-  storeDataToNvs("lastState", "sendToInfluxDB");
+  storeDataToNvs("lastState", "sendHouseToInflux");
   Point dataPoint("SolarPower");
 
   for (auto const &entry : sensorData) // Go through all values in sensorData
@@ -188,8 +201,8 @@ void sendToInfluxDB()
       {
       case 0:
         //  0: Status. Send both int and human-readable message
-        dataPoint.addField(name, strValue);         // Add human-readable message as a separate field
-        dataPoint.addField(label, intValue);        // Send original value as int (no float for error codes)
+        dataPoint.addField(name, strValue);  // Add human-readable message as a separate field
+        dataPoint.addField(label, intValue); // Send original value as int (no float for error codes)
         break;
 
       default:
@@ -210,6 +223,14 @@ void sendToInfluxDB()
     return;
   }
   Serial.println(" sucessful.");
+}
+
+void sendGrenhToInflux(GreenhouseSensorData data)
+{
+  storeDataToNvs("lastState", "sendGrenhToInflux");
+  Point dataPoint("Greenhouse");
+
+
 }
 
 bool collectSensorData()
