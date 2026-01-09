@@ -13,6 +13,11 @@ EventLogger::EventLogger(InfluxDBClient &client,
 {
     if (sdDetectPin >= 0)
         pinMode(sdDetectPin, INPUT_PULLUP);
+
+//    sdAvailable = SD.begin();
+    sdAvailable = false;    // Turn off b/c broken
+    if (!sdAvailable)
+        Serial.println("Inget SD-kort");
 }
 
 void EventLogger::log(const String &message, LogLevel level)
@@ -29,7 +34,7 @@ void EventLogger::log(const String &message, LogLevel level)
     bool fileSuccess = false;
     bool influxSuccess = false;
 
-    if (sdDetectPin >= 0 && digitalRead(sdDetectPin) == LOW)
+    if (checkSDStatus())
         fileSuccess = logToFile(timestamp, message, level);
 
     if (WiFi.status() == WL_CONNECTED)
@@ -40,9 +45,8 @@ void EventLogger::log(const String &message, LogLevel level)
     Serial.print(levelStr);
     Serial.print("\t");
     Serial.print(message);
-    Serial.print(influxSuccess ? " (sent to InfluxDB)" : " (not sent to InfluxDB)");
-    if (sdDetectPin >= 0)
-        Serial.print(fileSuccess ? " (written to file)" : " (not written to file)");
+    Serial.print(influxSuccess ? " (sent to InfluxDB," : " (not sent to InfluxDB,");
+    Serial.print(fileSuccess ? " written to file)" : " not written to file)");
     Serial.println();
 }
 
@@ -93,4 +97,31 @@ const char *EventLogger::levelToString(LogLevel level)
     default:
         return "UNKNOWN";
     }
+}
+
+bool EventLogger::checkSDStatus()
+{
+    // Om ingen pin används → returnera nuvarande status
+    if (sdDetectPin < 0)
+        return sdAvailable;
+
+    // Läs aktuell pin-status
+    int currentState = digitalRead(sdDetectPin);
+
+    // Om pinnen inte ändrats → gör inget
+    if (currentState == lastSdDetectState)
+        return sdAvailable;
+
+    // Uppdatera senaste kända status
+    lastSdDetectState = currentState;
+
+    // Någon har pillat på kortet → testa att initiera igen
+    sdAvailable = SD.begin();
+
+    if (sdAvailable)
+        Serial.println("SD-kort isatt");
+    else
+        Serial.println("SD-kort borttaget");
+
+    return sdAvailable;
 }

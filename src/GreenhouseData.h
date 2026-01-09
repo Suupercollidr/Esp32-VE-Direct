@@ -3,6 +3,8 @@
 #include <esp_system.h>
 #include <WiFi.h>
 #include <map>
+#include <esp_system.h>
+#include <esp_log.h>
 
 struct greenhouseSensorData
 {
@@ -30,36 +32,4 @@ uint8_t calculateChecksum(const greenhouseSensorData &data)
     sum ^= bytes[i];
   }
   return sum;
-}
-
-const char *getResetReason(esp_reset_reason_t reason)
-{
-  //storeDataToNvs("lastState", "getResetReason");
-  switch (reason)
-  {
-  case ESP_RST_UNKNOWN:
-    return "Unknown";
-  case ESP_RST_POWERON:
-    return "Power on";
-  case ESP_RST_EXT:
-    return "External reset";
-  case ESP_RST_SW:
-    return "Software reset";
-  case ESP_RST_PANIC:
-    return "Software panic";
-  case ESP_RST_INT_WDT:
-    return "Interrupt watchdog";
-  case ESP_RST_TASK_WDT:
-    return "Task watchdog";
-  case ESP_RST_WDT:
-    return "Other watchdogs";
-  case ESP_RST_DEEPSLEEP:
-    return "Deep sleep";
-  case ESP_RST_BROWNOUT:
-    return "Brownout";
-  case ESP_RST_SDIO:
-    return "SDIO";
-  default:
-    return "Not a valid reset reason";
-  }
 }

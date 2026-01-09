@@ -9,17 +9,11 @@
 #pragma once
 #include <Arduino.h>
 #include <map>
+#include "maputils.h"
 
-struct labelsAndUnits
-{
-  String displayName;
-  String unit;
-  int conversionFactor;
-};
-
-// Map value labels to human-readable names
+// Map value labels to human-readable display name names and units
 // Label, human-readable name, unit, conversion factor (0 for non-numerical values)
-const std::map<String, labelsAndUnits> labelMapping{
+const NameUnitMap mapLabelDisplaynameUnit{
     {"TIMESTAMP", {"Unix-tid", "s", 1}},
     {"ESP_UPTIME", {"Drifttid, kontroller", "s", 1}},
     {"ESP_MEM_FREE", {"Tillgängligt minne", "B", 1}},
@@ -58,7 +52,7 @@ const std::map<String, labelsAndUnits> labelMapping{
 };
 
 // Map message codes to messages, for various labels
-const std::map<String, std::map<int, String>> LabelCodeMapping{
+const CodeMap mapLabelCodeText{
     {"CTRL_INV_ON",
      {
          {0, "Av"},

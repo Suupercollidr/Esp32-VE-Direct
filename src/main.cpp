@@ -5,27 +5,24 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <time.h>
-#include <FS.h>
 #include <RTClib.h>
-#include <ESP32Ping.h>
+//#include <ESP32Ping.h>
 #include <InfluxDbClient.h>
 #include <InfluxDbCloud.h>
 #include <DHTesp.h>
-#include "nvs_flash.h"
-#include "nvs.h"
-// #include "configuration.h"
-#include "dev_configuration.h"
-#include "mappings.h"
+#include "maputils.h"
+#include "ReadEspNow.h"
+#include "nvsDebugData.h"
 #include "EventLogger.h"
+#include "mappings.h"
 #include "NTCSensor.h"
 #include "VEDirectData.h"
 #include "VEDirectDecoder.h"
-#include "SensorValue.h"
-#include "ReadEspNow.h"
+// #include "configuration.h"
+#include "dev_configuration.h"
 
 InfluxDBClient influxClient(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_DATA_BUCKET, INFLUXDB_TOKEN, InfluxDbCloud2CACert);
 InfluxDBClient influxLogClient(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_LOG_BUCKET, INFLUXDB_TOKEN, InfluxDbCloud2CACert);
-Point sensor("solar_status"); // Den här används nog inte
 
 EventLogger eventLog(influxLogClient, SD_DET, logFileName);
 
@@ -44,27 +41,30 @@ uint32_t lastInverterPowerChange = millis();
 tm timeinfo;
 time_t now;
 
-int inverterOn = 1;
+enum powerSwitch
+{
+  OFF,
+  ON
+};
 
-std::map<String, SensorValue> sensorData;
-std::map<String, int> numSensorData;
-std::map<String, String> humSensorData;
+powerSwitch inverterPowerState;
 
-bool collectSensorData();
-void mergeSensorMap(const std::map<String, SensorValue> &source, std::map<String, SensorValue> &destination);
-void setSensorValue(const String &key, float value);
+std::map<String, int> numSensorData;    // Numerical data
+std::map<String, String> humSensorData; // Human-readable data 
+
 const char *getResetReason(esp_reset_reason_t);
-void storeDataToNvs(const char *, const char *);
-String readDataFromNvs(const char *);
+
 void initWiFi();
-bool checkInfluxDbConnection();
+bool collectSensorData();
 void sendHouseToInflux();
+void sendGreenhouseToInflux(GreenhouseSensorData data);
 void controlInverterByVoltage();
 
 void setup()
 {
-  nvs_flash_init();
-  String lastEventBeforeReboot = readDataFromNvs("lastState");
+  initNvs();
+  String lastEventBeforeReboot = String(readDataFromNvs("lastState"));
+  esp_reset_reason_t resetReason = esp_reset_reason();
 
   Serial.begin(9600);
   Serial1.begin(19200, SERIAL_8N1, RXD1, TXD1);
@@ -74,54 +74,56 @@ void setup()
   Serial.println(" System is starting ");
   Serial.println("====================");
 
-  pinMode(RELAY1, OUTPUT);
-  pinMode(RELAY2, OUTPUT);
-  pinMode(RELAY3, OUTPUT);
+pinMode(RELAY1, OUTPUT);
+pinMode(RELAY2, OUTPUT);
+pinMode(RELAY3, OUTPUT);
 
-  initWiFi();
-  timeSync(TIME_ZONE, NTP_SERVER1, NTP_SERVER2, NTP_SERVER3);
-  checkInfluxDbConnection();
+initWiFi();
+timeSync(TIME_ZONE, NTP_SERVER1, NTP_SERVER2, NTP_SERVER3);
+if(!influxClient.validateConnection()) eventLog.log(String("Kunde inte ansluta till Influx DB på " + influxClient.getServerUrl() + "\nFelmeddelande: " + influxClient.getLastErrorMessage()), EventLogger::LogLevel::ERROR);
 
-  dhtSensorRoom.setup(DHT_PIN, DHTesp::DHT11);
+dhtSensorRoom.setup(DHT_PIN, DHTesp::DHT11);
 
-  esp_reset_reason_t resetReason = esp_reset_reason();
 
-  float setupTime = millis() / 1000;
+float setupTime = millis() / 1000;
 
-  eventLog.log(String("Systemet startat. Uppstarten tog " + String(setupTime) + " s."), EventLogger::LogLevel::INFO);
-  eventLog.log(String("Senaste återställning: " + String(getResetReason(resetReason)) + " (" + String(resetReason) + ")"), EventLogger::LogLevel::INFO);
-  eventLog.log(String("Senaste åtgärd: " + lastEventBeforeReboot), EventLogger::LogLevel::INFO);
+eventLog.log(String("Systemet startat. Uppstarten tog " + String(setupTime) + " s."), EventLogger::LogLevel::INFO);
+eventLog.log(String("Senaste återställning: " + String(getResetReason(resetReason)) + " (" + String(resetReason) + ")"), EventLogger::LogLevel::INFO);
+eventLog.log(String("Senaste åtgärd: " + lastEventBeforeReboot), EventLogger::LogLevel::INFO);
 
-  storeDataToNvs("lastState", "Setup end");
+storeDataToNvs("lastState", "Setup end");
+
 }
 
 void loop()
 {
   storeDataToNvs("lastState", "Loop");
-
-  // Fetch VE.Direct data at regular intervals 
+  
+  if(WiFi.status() != WL_CONNECTED) WiFi.reconnect();
+  
+  // Fetch VE.Direct data at regular intervals
   if (millis() >= lastUpdate + (UPDATE_INTERVAL * 1000))
   {
     collectSensorData();
-    // getCodeDesc();
-    controlInverterByVoltage();
+    controlInverterByVoltage();  // Turn off fridge if power is low 
     sendHouseToInflux();
     lastUpdate = millis();
   }
-
+  
   // Fetch greenhouse data if it has been recieved over ESP-NOW
   if (greenhouseData.hasNewData())
   {
     auto data = greenhouseData.getData();
     greenhouseData.clearNewDataFlag();
-    //sendGrenhToInflux(data);
+    sendGreenhouseToInflux(data);
   }
-
+  
+  
   yield();
   delay(10);
 }
 
-void initWiFi() // Connect to WiFi
+void initWiFi()  // Connect to WiFi
 {
   storeDataToNvs("lastState", "initWiFi");
   eventLog.log(String("Connecting to WiFi " + String(ssid)), EventLogger::LogLevel::INFO);
@@ -129,192 +131,131 @@ void initWiFi() // Connect to WiFi
   while (WiFi.status() != WL_CONNECTED)
   {
     delay(100);
-
+    
     Serial.print(".");
   }
   Serial.println();
   eventLog.log(String("Connected to WiFi " + String(ssid)), EventLogger::LogLevel::INFO);
 }
 
-void storeDataToNvs(const char *key, const char *value)
-{
-  if (!debugModeEnabled)
-    return;
-  nvs_handle_t stateLoggingHandle;
-  esp_err_t err = nvs_open("storage", NVS_READWRITE, &stateLoggingHandle);
-  if (err == ESP_OK)
-  {
-    nvs_set_str(stateLoggingHandle, key, value);
-    nvs_commit(stateLoggingHandle);
-    nvs_close(stateLoggingHandle);
-  }
-}
-
-String readDataFromNvs(const char *key)
-{
-  nvs_handle_t stateLoggingHandle;
-  char value[100];
-  size_t required_size;
-  esp_err_t err = nvs_open("storage", NVS_READONLY, &stateLoggingHandle);
-  if (err == ESP_OK)
-  {
-    nvs_get_str(stateLoggingHandle, key, NULL, &required_size);
-    nvs_get_str(stateLoggingHandle, key, value, &required_size);
-    nvs_close(stateLoggingHandle);
-  }
-  return String(value);
-}
-
-bool checkInfluxDbConnection()
-{
-  storeDataToNvs("lastState", "checkInfluxDbConnection");
-  if (influxClient.validateConnection())
-  {
-    eventLog.log(String("Ansluten till Influx DB: " + influxClient.getServerUrl()), EventLogger::LogLevel::INFO);
-    return true;
-  }
-  else
-  {
-    eventLog.log(String("Kunde inte ansluta till Influx DB: " + influxClient.getLastErrorMessage()));
-    return false;
-  }
-}
-
 void sendHouseToInflux()
 {
   storeDataToNvs("lastState", "sendHouseToInflux");
   Point dataPoint("SolarPower");
-
-  for (auto const &entry : sensorData) // Go through all values in sensorData
+  
+  for (auto const &entry : numSensorData) // Go through all values in numSensorData
   {
     String label = entry.first;
-    String strValue = entry.second.strValue;
-    float value = entry.second.intValue;
-
-    if (labelMapping.count(label) > 0) // Only send values if they exist in 'labelMapping'
+    int value = entry.second;
+    
+    if (!mapLabelDisplaynameUnit.count(label) > 0)
+    continue; // Only send values if they exist in 'mapLabelDisplaynameUnit'
+    
+    auto conversionFactor = mapLabelDisplaynameUnit.at(label).conversionFactor;
+    
+    if (conversionFactor == 1) // Exactly 1 means no conversion, send int
+    dataPoint.addField(label, value);
+    
+    if (conversionFactor > 1) // More than 1, divide by conversion factor to get reasonable unit (for example, convert mV to V)
+    dataPoint.addField(label, static_cast<double>(value) / conversionFactor);
+    
+    if (conversionFactor == 0) //  0: Status or code
     {
-      String name = labelMapping.at(label).displayName;
-      int conversionFactor = labelMapping.at(label).conversionFactor;
-      int intValue = round(value);
-      String humanReadableMsg = "";
-      switch (conversionFactor) // Check if we need to convert values
-      {
-      case 0:
-        //  0: Status. Send both int and human-readable message
-        dataPoint.addField(name, strValue);  // Add human-readable message as a separate field
-        dataPoint.addField(label, intValue); // Send original value as int (no float for error codes)
-        break;
-
-      default:
-        // >0: Divide by conversion factor to get reasonable unit (for example, convert mV to V)
-        value /= conversionFactor; // Convert integerized value to sensible float value (like mV to V)
-        dataPoint.addField(label, value);
-        break;
-      }
+      dataPoint.addField(label, value); // Send original value as int (no float for error codes)
     }
   }
-
+  
+  for (auto const &entry : humSensorData)
+  dataPoint.addField(entry.first, entry.second);
+  
   const bool influxDbResponse = influxClient.writePoint(dataPoint); // Send data point to InfluxDB
-  Serial.print("Sending to InfluxDB");
+  Serial.print("Sending solar data to InfluxDB");
   if (!influxDbResponse)
   {
     Serial.println(" failed.");
-    eventLog.log(influxClient.getLastErrorMessage());
+    eventLog.log(influxClient.getLastErrorMessage(), EventLogger::LogLevel::ERROR);
     return;
   }
-  Serial.println(" sucessful.");
+  Serial.println(" successful.");
 }
 
-void sendGrenhToInflux(GreenhouseSensorData data)
+void sendGreenhouseToInflux(GreenhouseSensorData data)
 {
-  storeDataToNvs("lastState", "sendGrenhToInflux");
+  storeDataToNvs("lastState", "sendGreenhouseToInflux");
   Point dataPoint("Greenhouse");
-
-
+  const bool influxDbResponse = influxClient.writePoint(dataPoint); // Send data point to InfluxDB
+  Serial.print("Sending greenhouse data to InfluxDB");
+  if (!influxDbResponse)
+  {
+    Serial.println(" failed.");
+    eventLog.log(influxClient.getLastErrorMessage(), EventLogger::LogLevel::ERROR);
+    return;
+  }
+  Serial.println(" successful.");
 }
 
 bool collectSensorData()
 {
   storeDataToNvs("lastState", "collectSensorData");
-  sensorData.clear();
-
+  numSensorData.clear();
+  humSensorData.clear();
+  
   // Current time
   time(&now);
   char strTimestamp[20];
-  strftime(strTimestamp, sizeof(strTimestamp), "%Y-%m-%d %H:%M:%S", localtime(&now));
-  sensorData["TIMESTAMP"].strValue = strTimestamp;
-  sensorData["TIMESTAMP"].isNumeric = true;
-  sensorData["TIMESTAMP"].intValue = now;
-
+  
+  numSensorData["TIMESTAMP"] = now;
+  humSensorData["Time"] = strftime(strTimestamp, sizeof(strTimestamp), "%Y-%m-%d %H:%M:%S", localtime(&now));
+  
   // ESP statistics and performance
-  sensorData["ESP_UPTIME"].isNumeric = true;
-  sensorData["ESP_UPTIME"].intValue = millis();
-  sensorData["ESP_MEM_FREE"].isNumeric = true;
-  sensorData["ESP_MEM_FREE"].intValue = ESP.getFreeHeap();
-  sensorData["ESP_MEM_LOWEST"].isNumeric = true;
-  sensorData["ESP_MEM_LOWEST"].intValue = ESP.getMinFreeHeap();
-  sensorData["ESP_PSRAM_FREE"].isNumeric = true;
-  sensorData["ESP_PSRAM_FREE"].intValue = ESP.getFreePsram();
-  sensorData["ESP_PSRAM_LOWEST"].isNumeric = true;
-  sensorData["ESP_PSRAM_LOWEST"].intValue = ESP.getFreePsram();
-
+  numSensorData["ESP_UPTIME"] = millis();
+  numSensorData["ESP_MEM_FREE"] = ESP.getFreeHeap();
+  numSensorData["ESP_MEM_LOWEST"] = ESP.getMinFreeHeap();
+  numSensorData["ESP_PSRAM_FREE"] = ESP.getFreePsram();
+  numSensorData["ESP_PSRAM_LOWEST"] = ESP.getFreePsram();
+  
   // States
-  sensorData["CTRL_INV_ON"].strValue = inverterOn;
-
+  numSensorData["CTRL_INV_ON"] = static_cast<int>(inverterPowerState);
+  
   // Sensor data
   if (victronInverter.update())
   {
-    VEDirectDecoder inverterDecoder(LabelCodeMapping);
-    std::map<String, SensorValue> decodedData = inverterDecoder.decodeMap(victronInverter.getData());
-    mergeSensorMap(decodedData, sensorData);
+    std::map<String, int> intData = victronInverter.getData();
+    mergeMaps(intData, numSensorData);
+    
   }
-
   if (victronMppt.update())
   {
-    VEDirectDecoder mpptDecoder(LabelCodeMapping);
-    std::map<String, SensorValue> decodedData = mpptDecoder.decodeMap(victronMppt.getData());
-    mergeSensorMap(decodedData, sensorData);
+    std::map<String, int> intData = victronMppt.getData();
+    mergeMaps(intData, numSensorData);
   }
-
+  
+  // Get human-readable messages for any staus codes that exist in LableCodeMappings 
+  VEDirectDecoder messageDecoder(mapLabelDisplaynameUnit, mapLabelCodeText);
+  std::map<String, String> decodedMessages = messageDecoder.VEDirectCodeMapToHumanReadable(numSensorData);
+  mergeMaps(decodedMessages, humSensorData);
+  
   // NTC sensors
   if (auto temperature = ntcSensor1.temperature(); temperature.has_value())
-    setSensorValue("ENV_REFRIG_TEMP", *temperature);
-
+  numSensorData["ENV_REFRIG_TEMP"] = *temperature;
+  
   if (auto temperature = ntcSensor2.temperature(); temperature.has_value())
-    setSensorValue("ENV_FREEZER_TEMP", *temperature);
-
-  setSensorValue("ENV_ROOM_TEMP", dhtSensorRoom.getTemperature());
-  setSensorValue("ENV_ROOM_HUMID", dhtSensorRoom.getHumidity());
-
+  numSensorData["ENV_FREEZER_TEMP"] = *temperature;
+  
+  numSensorData["ENV_ROOM_TEMP"] = dhtSensorRoom.getTemperature();
+  numSensorData["ENV_ROOM_HUMID"] = dhtSensorRoom.getHumidity();
+  
   return true;
-}
-
-void setSensorValue(const String &key, float value)
-{
-  if (isnan(value))
-    return;
-
-  SensorValue val;
-  val.intValue = round(value);
-  val.isNumeric = true;
-  val.strValue = String(value, 1);
-  sensorData[key] = val;
-}
-
-void mergeSensorMap(const std::map<String, SensorValue> &source, std::map<String, SensorValue> &destination)
-{
-  for (auto [key, val] : source)
-    destination[key] = val;
 }
 
 void controlInverterByVoltage()
 {
-  const int voltage = sensorData["VE_MPPT_V"].intValue; // Battery voltage in mV. Using MPPT voltage, since Inv. voltage = 0 when off
-
+  const int voltage = numSensorData["VE_MPPT_V"]; // Battery voltage in mV. Using MPPT voltage, since Inv. voltage = 0 when off
+  
   // If state changed more recent than retry period, do nothing
   if (millis() - lastInverterPowerChange < (INV_RETRY_PERIOD * 1000))
-    return;
-
+  return;
+  
   // Do nothing on coco-bananas values
   if (voltage < 1000 || voltage > 20000)
   {
@@ -322,23 +263,23 @@ void controlInverterByVoltage()
     eventLog.log(messageText, EventLogger::LogLevel::WARNING);
     return;
   }
-
-  // If battery voltage is lower then off voltage, turn inverter off
-  if (inverterOn == 1 && voltage < INV_OFF_VOLTAGE)
+  
+  // If battery voltage is lower than off voltage, turn inverter off
+  if (inverterPowerState == ON && voltage < INV_OFF_VOLTAGE)
   {
     digitalWrite(RELAY1, HIGH); // Relay is NC
     lastInverterPowerChange = millis();
-    inverterOn = 0;
+    inverterPowerState = OFF;
     eventLog.log("Inverter stängdes av, låg batterispänning", EventLogger::LogLevel::INFO);
     return;
   }
-
+  
   // If battery voltage is higher than on voltage, turn inverter on
-  if (inverterOn == 0 && voltage > INV_ON_VOLTAGE)
+  if (inverterPowerState == OFF && voltage > INV_ON_VOLTAGE)
   {
     digitalWrite(RELAY1, LOW); // Relay is NC
     lastInverterPowerChange = millis();
-    inverterOn = 1;
+    inverterPowerState = ON;
     eventLog.log("Inverter slogs på, tillräcklig batterispänning ", EventLogger::LogLevel::INFO);
     return;
   }

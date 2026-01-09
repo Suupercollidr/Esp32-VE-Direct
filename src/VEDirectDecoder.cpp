@@ -1,49 +1,41 @@
 #include <algorithm>
 #include "VEDirectDecoder.h"
-#include "SensorValue.h"
-
 
 extern EventLogger eventLog;
 
-SensorValue VEDirectDecoder::decodeToSensorValue(const String &label, int value)
+String VEDirectDecoder::VEDirectCodeToHumanReadable(const String &label, int value)
 {
-    SensorValue result;
-    result.intValue = value;
-    result.isNumeric = true;
+    if (codesMap.count(label) == 0) // Only look for codes if there's an entry in the codesMap
+        return "";
+
+    String result;
 
     // Hitta vilka koder som ingår
     std::vector<int> codes = findCodes(label, value);
 
     if (codes.empty())
     {
-        eventLog.log("Hittade inga felmeddelanden för " + String(value));
-        result.strValue = String(value); // If we can't find anything, keep the numerical value
+        eventLog.log("Hittade inga felmeddelanden för \"" + label + "\" " + String(value));
+        result = String(value); // If we can't find anything, keep the numerical value
         return result;
     }
 
     // Look up message text
-    result.strValue = lookupMessages(label, codes);
+    result = lookupMessages(label, codes);
     return result;
 }
 
-std::map<String, SensorValue> VEDirectDecoder::decodeMap(const std::map<String, SensorValue> &rawData)
+std::map<String, String> VEDirectDecoder::VEDirectCodeMapToHumanReadable(const std::map<String, int> &rawData)
 {
-    std::map<String, SensorValue> result;
-    
+    std::map<String, String> result;
+
     for (const auto &entry : rawData)
     {
-        const String &label = entry.first;
-        const SensorValue &val = entry.second;
-
-        if (val.isNumeric && mappings.count(label))
-        {
-            result[label] = decodeToSensorValue(label, val.intValue);
-        }
-        else
-        {
-            result[label] = val; // lämna orört
-        }
-    }
+        String humanReadableMessage =  VEDirectCodeToHumanReadable(entry.first, entry.second);
+        String displayName = namesMap.at(entry.first).displayName;
+        if (!humanReadableMessage.isEmpty())
+            result[displayName] = humanReadableMessage;
+    }   
     return result;
 }
 
@@ -54,8 +46,8 @@ std::map<String, SensorValue> VEDirectDecoder::decodeMap(const std::map<String, 
  */
 std::vector<int> VEDirectDecoder::findCodes(const String &label, int value)
 {
-    auto it = mappings.find(label);
-    if (it == mappings.end())
+    auto it = codesMap.find(label);
+    if (it == codesMap.end())
         return {};
 
     const std::map<int, String> &codeMap = it->second;
@@ -86,8 +78,8 @@ std::vector<int> VEDirectDecoder::findCodes(const String &label, int value)
 String VEDirectDecoder::lookupMessages(const String &label,
                                        const std::vector<int> &codes)
 {
-    auto it = mappings.find(label);
-    if (it == mappings.end())
+    auto it = codesMap.find(label);
+    if (it == codesMap.end())
     {
         eventLog.log(String("Unknown label " + label), EventLogger::LogLevel::ERROR);
         return "Okänd label: " + label;

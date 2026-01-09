@@ -19,14 +19,13 @@
 #include <Arduino.h>
 #include <HardwareSerial.h>
 #include <map>
-#include "SensorValue.h"
 
 class VEDirectSerial
 {
     private:
     HardwareSerial &serial;
     String prefix;
-    std::map<String, SensorValue> sensorData;
+    std::map<String, int> numSensorData; 
 
     String getMessageFromSerial();
     static String trimMessage(String message);
@@ -38,5 +37,5 @@ public:
     explicit VEDirectSerial(HardwareSerial &serialPort, const String &prefixName = "")
         : serial(serialPort), prefix(prefixName) {}
     bool update();
-    const std::map<String, SensorValue> &getData() const;
+    const std::map<String, int> &getData() const;
 };

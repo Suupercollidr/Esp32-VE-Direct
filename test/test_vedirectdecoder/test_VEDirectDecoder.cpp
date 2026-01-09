@@ -42,7 +42,7 @@ void setUp(void) {
 // Test: exact match
 // ------------------------
 void test_exact_match(void) {
-    SensorValue val = decoder.decodeToSensorValue("VE_MPPT_ERR", 2);
+    SensorValue val = decoder.VEDirectCodeToHumanReadable("VE_MPPT_ERR", 2);
     TEST_ASSERT_EQUAL(2, val.intValue);
     TEST_ASSERT_TRUE(val.isNumeric);
     TEST_ASSERT_EQUAL_STRING("Slut på smör", val.strValue.c_str());
@@ -52,7 +52,7 @@ void test_exact_match(void) {
 // Test: combination 2+4=6
 // ------------------------
 void test_combination(void) {
-    SensorValue val = decoder.decodeToSensorValue("VE_MPPT_ERR", 6);
+    SensorValue val = decoder.VEDirectCodeToHumanReadable("VE_MPPT_ERR", 6);
     TEST_ASSERT_EQUAL(6, val.intValue);
     TEST_ASSERT_TRUE(val.isNumeric);
 
@@ -65,7 +65,7 @@ void test_combination(void) {
 // Test: unknown code
 // ------------------------
 void test_unknown_code(void) {
-    SensorValue val = decoder.decodeToSensorValue("VE_MPPT_ERR", 99);
+    SensorValue val = decoder.VEDirectCodeToHumanReadable("VE_MPPT_ERR", 99);
     TEST_ASSERT_EQUAL(99, val.intValue);
     TEST_ASSERT_TRUE(val.isNumeric);
     TEST_ASSERT_EQUAL_STRING("99", val.strValue.c_str()); // fallback
@@ -75,7 +75,7 @@ void test_unknown_code(void) {
 // Test: unknown label
 // ------------------------
 void test_unknown_label(void) {
-    SensorValue val = decoder.decodeToSensorValue("UNKNOWN_LABEL", 1);
+    SensorValue val = decoder.VEDirectCodeToHumanReadable("UNKNOWN_LABEL", 1);
     TEST_ASSERT_EQUAL(1, val.intValue);
     TEST_ASSERT_TRUE(val.isNumeric);
     TEST_ASSERT(val.strValue.find("Okänd label") != std::string::npos);

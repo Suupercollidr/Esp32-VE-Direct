@@ -4,21 +4,21 @@
 #include <vector>
 #include "SensorValue.h"
 #include "EventLogger.h"
+#include "maputils.h"
 
 class VEDirectDecoder
 {
 public:
-    using CodeMap  = std::map<int, String>;
-    using LabelMap = std::map<String, CodeMap>;
+    explicit VEDirectDecoder(const NameUnitMap &mapLabelDisplaynameUnit,
+                             const CodeMap &mapLabelCodeText)
+        : namesMap(mapLabelDisplaynameUnit), codesMap(mapLabelCodeText) {}
 
-    explicit VEDirectDecoder(const LabelMap &mappings)
-        : mappings(mappings) {}
-
-    SensorValue decodeToSensorValue(const String &label, int value);
-    std::map<String, SensorValue> decodeMap(const std::map<String, SensorValue> &rawData);
+    String VEDirectCodeToHumanReadable(const String &label, int value);
+    std::map<String, String> VEDirectCodeMapToHumanReadable(const std::map<String, int> &rawData);
 
 private:
-    LabelMap mappings;
+    NameUnitMap namesMap;
+    CodeMap codesMap;
 
     std::vector<int> findCodes(const String &label, int value);
     String lookupMessages(const String &label, const std::vector<int> &codes);

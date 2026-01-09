@@ -1,6 +1,5 @@
 #include "VEDirectData.h"
 #include "EventLogger.h"
-#include "SensorValue.h"
 
 extern EventLogger eventLog;
 
@@ -104,8 +103,7 @@ bool VEDirectSerial::calcChecksum(String message)
  * Tab             (0x09): End of the label, start of the value
  *
  *        Adds prefix to the label, if a prefix exists.
- *        Each field is stored as a SensorValue in sensorData, with both raw string
- *        and integer (if the value is numerical).
+ *        Each field is stored as an int in the map.
  *
  * @param message The trimmed VE.Direct message block
  *
@@ -127,13 +125,7 @@ void VEDirectSerial::storeMessage(String message)
                 fieldLabel = "VE_" + prefix + "_" + fieldLabel;
 
             if (fieldLabel.length() > 0)
-            {
-                SensorValue val;
-                val.strValue = fieldValue;
-                val.isNumeric = isNumeric(fieldValue);
-                val.intValue = val.isNumeric ? fieldValue.toInt() : 0;
-                sensorData[fieldLabel] = val;
-            }
+                numSensorData[fieldLabel] = fieldValue.toInt();
 
             fieldLabel.clear();
             fieldValue.clear();
@@ -186,9 +178,9 @@ bool VEDirectSerial::update()
 /**
  * @brief Access the parsed sensor values.
  *
- * @return const reference to the internal map of field labels to SensorValue
+ * @return const reference to the internal map of field labels
  */
-const std::map<String, SensorValue> &VEDirectSerial::getData() const
+const std::map<String, int> &VEDirectSerial::getData() const
 {
-    return sensorData;
+    return numSensorData;
 }
