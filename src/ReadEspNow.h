@@ -2,34 +2,9 @@
 #include <esp_now.h>
 #include <WiFi.h>
 #include "EventLogger.h"
+#include "GreenhouseData.h"
 
 extern EventLogger eventLog;
-
-// Status-bitar för sensorer
-struct SensorStatus
-{
-    unsigned ClimateSensorStatus : 1;
-    unsigned SoilSensor1Status : 1;
-    unsigned SoilSensor2Status : 1;
-    unsigned OneWireDeviceCount : 5; // 0 = fail, 1-31 = success
-};
-
-// Strukturen som skickas via ESP-NOW
-#pragma pack(push, 1)
-struct GreenhouseSensorData
-{
-    int16_t outdoorTemp;
-    int16_t indoorTemp;
-    int16_t soilTemp1;
-    int16_t soilTemp2;
-    uint16_t indoorHumidity;
-    uint16_t soilMoisture1;
-    uint16_t soilMoisture2;
-    uint16_t batteryVoltage;
-    SensorStatus status;
-    uint8_t checksum;
-};
-#pragma pack(pop)
 
 // Klass för ESP-NOW mottagning
 class ESPNowReceiver
@@ -51,6 +26,11 @@ private:
             eventLog.log("Received data has invalid length: " + String(len), EventLogger::LogLevel::WARNING);
             return;
         }
+
+        char macStr[18];
+        sprintf(macStr, "%02X:%02X:%02X:%02X:%02X:%02X",
+                mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        Serial.printf("Received %d bytes from %s\n", len, macStr);
 
         memcpy(&_data, incomingData, sizeof(_data));
 
@@ -126,9 +106,10 @@ public:
 
         if (esp_now_init() != ESP_OK)
         {
-            Serial.println("Error initializing ESP-NOW");
+            eventLog.log("Error initializing ESP-NOW", EventLogger::LogLevel::ERROR);
             return;
         }
+        eventLog.log("ESP-NOW initialized", EventLogger::LogLevel::INFO);
 
         esp_now_register_recv_cb(onDataReceivedStatic);
     }

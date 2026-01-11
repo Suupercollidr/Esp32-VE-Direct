@@ -85,8 +85,8 @@ bool VEDirectSerial::calcChecksum(String message)
     uint8_t checksum = 0;
     for (char c : message)
     {
-        checksum = (checksum + int(c)) & 256; // Nuvarande. Enl. ChatGPT är det fel och returnerar alltid 0
-        // checksum = (checksum + (uint8_t)c) % 256;  // Den här ska vara bättre (eller "rätt" rent av)
+        // checksum = (checksum + int(c)) & 256; // Nuvarande. Enl. ChatGPT är det fel och returnerar alltid 0
+        checksum = (checksum + (uint8_t)c) % 256;  // Den här ska vara bättre (eller "rätt" rent av)
         // checksum += (uint8_t)c; // Och den här smidigare, p.g.a. automatisk wrap-around vid 256
     }
     return (checksum == 0);
@@ -166,7 +166,7 @@ bool VEDirectSerial::update()
 
     if (!calcChecksum(message))
     {
-        String logMsg = "Checksum didn't match\r\nMessage block:\r\n" + message;
+        String logMsg = "Checksum didn't match for " + prefix + ".\r\nMessage block:\r\n" + message;
         eventLog.log(logMsg, EventLogger::LogLevel::ERROR);
         return false;
     }
