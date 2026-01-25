@@ -16,7 +16,8 @@
 #include "EventLogger.h"
 #include "mappings.h"
 #include "NTCSensor.h"
-#include "VEDirectData.h"
+#include "VEDirectSerialReader.h"
+#include "VEDirectParseMessage.h"
 #include "VEDirectDecoder.h"
 // #include "configuration.h"
 #include "dev_configuration.h"
@@ -30,8 +31,8 @@ DHTesp dhtSensorRoom;
 NTCSensor ntcSensor1(NTC_POWER_PIN, NTC1_READ_PIN);
 NTCSensor ntcSensor2(NTC_POWER_PIN, NTC2_READ_PIN);
 
-VEDirectSerial victronInverter(Serial1, "INV");
-VEDirectSerial victronMppt(Serial2, "MPPT");
+VEDirectSerialReader victronInverter(Serial1);
+VEDirectSerialReader victronMppt(Serial2);
 
 ESPNowReceiver greenhouseData;
 
@@ -101,6 +102,9 @@ void loop()
 
   if (WiFi.status() != WL_CONNECTED)
     WiFi.reconnect();
+
+  victronInverter.update();
+  victronMppt.update();
 
   // Fetch VE.Direct data at regular intervals
   if (millis() >= lastUpdate + (UPDATE_INTERVAL * 1000))
@@ -238,12 +242,16 @@ bool collectSensorData()
   // Sensor data
   if (victronInverter.update())
   {
-    std::map<String, int> intData = victronInverter.getData();
+    String inverterData = victronInverter.getMessage();
+    VEDirectParseMessage intMessage("INV");
+    std::map<String, int> intData = intMessage.parseAsInt(inverterData);
     mergeMaps(intData, numSensorData);
   }
   if (victronMppt.update())
   {
-    std::map<String, int> intData = victronMppt.getData();
+    String mpptData = victronMppt.getMessage();
+    VEDirectParseMessage intMessage("MPPT");
+    std::map<String, int> intData = intMessage.parseAsInt(mpptData);
     mergeMaps(intData, numSensorData);
   }
 
