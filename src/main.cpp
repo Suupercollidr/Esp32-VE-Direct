@@ -4,9 +4,10 @@
 #include <optional>
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <WebServer.h>
+#include <ElegantOTA.h>
 #include <time.h>
 #include <RTClib.h>
-// #include <ESP32Ping.h>
 #include <InfluxDbClient.h>
 #include <InfluxDbCloud.h>
 #include <DHTesp.h>
@@ -21,6 +22,8 @@
 #include "VEDirectDecoder.h"
 // #include "configuration.h"
 #include "dev_configuration.h"
+
+WebServer localWebServer(80);
 
 InfluxDBClient influxClient(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_DATA_BUCKET, INFLUXDB_TOKEN, InfluxDbCloud2CACert);
 InfluxDBClient influxLogClient(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_LOG_BUCKET, INFLUXDB_TOKEN, InfluxDbCloud2CACert);
@@ -53,6 +56,21 @@ powerSwitch inverterPowerState;
 std::map<String, int> numSensorData;    // Numerical data
 std::map<String, String> humSensorData; // Human-readable data
 
+/*
+According to VE.Direct documentation, these are the maximum sizes:
+  Field label: 9 bytes (though with prefixes like "VE_MPPT_", let's make it an even 20 or something)
+  Field value: 33 bytes
+  Message size: 22 fields (like 2 * 22 + like 10 other non-VE fields makes that like 60)
+
+So, instead of using String, and std::map<String, String>,
+could use char[] and a std::array<Field, 60> where Field is:
+struct Field {
+  char label[20];
+  char value[33];
+}
+
+*/
+
 const char *getResetReason(esp_reset_reason_t);
 
 void initWiFi();
@@ -78,10 +96,17 @@ void setup()
   pinMode(RELAY1, OUTPUT);
   pinMode(RELAY2, OUTPUT);
   pinMode(RELAY3, OUTPUT);
-
+  
   greenhouseData.begin();
   initWiFi();
   timeSync(TIME_ZONE, NTP_SERVER1, NTP_SERVER2, NTP_SERVER3);
+
+  localWebServer.on("/", []()
+                    { localWebServer.send(200, "text/plain", "Tere tulemast Eesti saatkonda!"); });
+  ElegantOTA.begin(&localWebServer);
+  localWebServer.begin();
+  eventLog.log(String("Webbserver startad på " + String(WiFi.localIP())), EventLogger::LogLevel::INFO);
+
   if (!influxClient.validateConnection())
     eventLog.log(String("Kunde inte ansluta till Influx DB på " + influxClient.getServerUrl() + "\nFelmeddelande: " + influxClient.getLastErrorMessage()), EventLogger::LogLevel::ERROR);
 
@@ -124,8 +149,10 @@ void loop()
     sendGreenhouseToInflux(data);
   }
 
+  localWebServer.handleClient();
+  ElegantOTA.loop();
+
   yield();
-  delay(10);
 }
 
 void initWiFi() // Connect to WiFi
