@@ -1,4 +1,7 @@
 #include "VEDirectSerialReader.h"
+#include "EventLogger.h"
+
+extern EventLogger eventLog;
 
 VEDirectSerialReader::~VEDirectSerialReader()
 {
@@ -57,7 +60,7 @@ char *VEDirectSerialReader::messageToLinearBuffer(const char *ringBuffer, size_t
 {
     if (start >= BUFFER_SIZE || end >= BUFFER_SIZE) // Hantera fel, t.ex. returnera nullptr eller kasta ett undantag
     {
-        Serial.println("Start- eller slutposition utanför bufferten");
+        eventLog.log("Start- eller slutposition utanför bufferten", EventLogger::LogLevel::WARNING);
         return nullptr;
     }
     // Beräkna längden på meddelandet
@@ -94,12 +97,14 @@ char *VEDirectSerialReader::messageToLinearBuffer(const char *ringBuffer, size_t
         char j = messageBuffer[i];
         Serial.print(j);
     }
+    /*
     Serial.println();
     Serial.print("Första tecknet är: ");
     Serial.println(static_cast<int>(messageBuffer[0]));
     Serial.print("Sista tecknet är: ");
     Serial.println(static_cast<int>(messageBuffer[messageLength - 1]));
     Serial.flush();
+    */
 
     return messageBuffer;
 }
@@ -122,7 +127,6 @@ bool VEDirectSerialReader::verifyChecksum(const char *message, size_t length)
 
     Serial.println();
     Serial.println("Summa inkl. checksum (ska vara 0): " + String(sum));
-    Serial.print("Checksum i meddelandet: ");
     Serial.println(static_cast<uint8_t>(message[length - 1]));
 
     return (sum == 0);
@@ -143,7 +147,7 @@ bool VEDirectSerialReader::update()
     int endPos = searchChecksumBackwards(ringBuffer, RingBufferWritePos, endOfMessage);
     if (endPos == -1)
     {
-        Serial.println("Hittade inget meddelandeslut");
+        Serial.println("Hittar inget meddelandeslut");
         Serial.flush();
         return false;
     }
@@ -154,7 +158,7 @@ bool VEDirectSerialReader::update()
 
     if (startPos < 0 || startPos == endPos) // If only find one endOfMessage, assume there is exactly 1 message at the start of the buffer
     {
-        Serial.println("Hittade inget gammalt meddelande, så börjar på 0");
+        Serial.println("Hittar inget gammalt meddelande, börjar på 0");
         Serial.flush();
         start = 0;
     }
@@ -162,7 +166,6 @@ bool VEDirectSerialReader::update()
     {
         start = (startPos + strlen(endOfMessage) + 1) % BUFFER_SIZE;
     }
-    Serial.println("Meddelandet är från " + String(start) + " till " + String(end));
 
     char *message = messageToLinearBuffer(ringBuffer, start, end);
     if (message == nullptr)
@@ -174,7 +177,7 @@ bool VEDirectSerialReader::update()
 
     if (!verifyChecksum(message, length))
     {
-        Serial.println("Felaktig checksum");
+        eventLog.log("Felaktig kontrollsumma för:\n" + String(message), EventLogger::LogLevel::WARNING);
         return false;
     }
 

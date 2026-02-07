@@ -93,7 +93,7 @@ void setup()
   String lastEventBeforeReboot = String(readDataFromNvs("lastState"));
   esp_reset_reason_t resetReason = esp_reset_reason();
 
-  Serial.begin(9600);
+  Serial.begin(115200);
   Serial1.begin(19200, SERIAL_8N1, RXD1, TXD1);
   Serial2.begin(19200, SERIAL_8N1, RXD2, TXD2);
 
@@ -147,22 +147,33 @@ void loop()
   ElegantOTA.loop();
 
   victronInverter.update();
-  victronMppt.update();
+
+  if (victronInverter.update())
+    Serial.println("Tog emot ny data från inverter");
+
+  if (victronMppt.update())
+    Serial.println("Tog emot ny data från MPPT");
 
   std::vector<Point> influxPoints;
 
   // Send data at regular intervals
   if (millis() >= lastUpdate + (UPDATE_INTERVAL * 1000))
   {
+    Serial.println("Samlar ihop och skickar data till Influx");
+    storeDataToNvs("lastState", "Send data triggered");
+
     controlInverterByVoltage(); // Turn off fridge if power is low
     controlLight();
 
-    inverterData.parseAsInt(victronInverter.getMessage());
-    mpptData.parseAsInt(victronMppt.getMessage());
+    inverterData.stringToMap(victronInverter.getMessage());
+    mpptData.stringToMap(victronMppt.getMessage());
 
     // Victron VE.Direct units
-    influxPoints.emplace_back(veToInflux("Inverter", inverterData, inverterConversions, inverterDisplayNames, inverterCodes));
-    influxPoints.emplace_back(veToInflux("MPPT", mpptData, mpptConversions, mpptDisplayNames, mpptCodes));
+    if (!inverterData.getIntMap().empty())
+      influxPoints.emplace_back(veToInflux("Inverter", inverterData, inverterConversions, inverterDisplayNames, inverterCodes));
+    const auto &mpptDataMap = mpptData.getIntMap();
+    if (!mpptDataMap.empty())
+      influxPoints.emplace_back(veToInflux("MPPT", mpptData, mpptConversions, mpptDisplayNames, mpptCodes));
 
     influxPoints.emplace_back(sysStatsToInflux());
     influxPoints.emplace_back(houseStatsToInflux());
@@ -173,26 +184,28 @@ void loop()
   // Fetch greenhouse data if it has been recieved over ESP-NOW
   if (greenhouseData.hasNewData())
   {
-    Serial.println("Received data from greenhouse");
+    Serial.println("Tog emot data från växthuset");
+    storeDataToNvs("lastState", "Recieved data from greenhouse");
+
     auto data = greenhouseData.getData();
     greenhouseData.clearNewDataFlag();
     influxPoints.emplace_back(greenhouseToInflux(data));
   }
 
   // Send all gathered data to InfluxDB
+  Serial.println("Skickar till Influx: ");
   for (auto &thisPoint : influxPoints)
   {
     const bool influxDbResponse = influxClient.writePoint(thisPoint); // Send data point to InfluxDB
-    Serial.print("Sending point to InfluxDB");
+    Serial.println(thisPoint.toLineProtocol());
+
     if (!influxDbResponse)
     {
-      Serial.println(" failed.");
-      Serial.print("This point failed:");
+      Serial.print("Misslyckades med att skicka: ");
       Serial.println(thisPoint.toLineProtocol());
       eventLog.log(influxClient.getLastErrorMessage(), EventLogger::LogLevel::ERROR);
       continue;
     }
-    Serial.println(" successful.");
   }
 
   yield();
@@ -201,7 +214,7 @@ void loop()
 void initWiFi() // Connect to WiFi
 {
   storeDataToNvs("lastState", "initWiFi");
-  eventLog.log(String("Connecting to WiFi " + String(ssid)), EventLogger::LogLevel::INFO);
+  eventLog.log(String("Ansluter till WiFi " + String(ssid)), EventLogger::LogLevel::INFO);
   eventLog.log(String("MAC-adress: " + WiFi.macAddress()), EventLogger::LogLevel::INFO);
 
   WiFi.begin(ssid, password, 6);
@@ -212,7 +225,7 @@ void initWiFi() // Connect to WiFi
     Serial.print(".");
   }
   Serial.println();
-  eventLog.log(String("Connected to WiFi " + String(ssid) + " (channel: " + WiFi.channel() + ")"), EventLogger::LogLevel::INFO);
+  eventLog.log(String("Ansluten till WiFi " + String(ssid) + " (kanal: " + WiFi.channel() + ")"), EventLogger::LogLevel::INFO);
 }
 
 Point greenhouseToInflux(GreenhouseSensorData data)
@@ -239,6 +252,8 @@ Point greenhouseToInflux(GreenhouseSensorData data)
 
 Point sysStatsToInflux()
 {
+  storeDataToNvs("lastState", "sysStatsToInflux");
+
   Point sysStats("ESP");
   time(&now);
   sysStats.addField("Timestamp", now);
@@ -252,6 +267,8 @@ Point sysStatsToInflux()
 
 Point houseStatsToInflux()
 {
+  storeDataToNvs("lastState", "houseStatsToInflux");
+
   Point houseStats("Huvudbyggnad");
   if (auto temperature = ntcSensor1.temperature(); temperature.has_value())
     houseStats.addField("Temp_kyl", temperature.value());
@@ -270,10 +287,15 @@ Point houseStatsToInflux()
 
 Point veToInflux(String pointName, VEDirectParseMessage parsedMessage, std::map<String, int> conversionFactors, std::map<String, String> displayNames, CodeMap codes)
 {
+  storeDataToNvs("lastState", "veToInflux");
+
   Point newPoint(pointName);
-  const auto &intData = parsedMessage.getIntData();
+  const auto &intData = parsedMessage.getIntMap();
   VEDirectDecoder decoder(displayNames, codes);
   std::map<String, String> decodedMessages = decoder.VEDirectCodeMapToHumanReadable(intData);
+
+  if (intData.empty())
+    eventLog.log("Försökte skapa Point \"" + pointName + "\" från en tom Map", EventLogger::LogLevel::WARNING);
 
   for (auto const &[key, val] : intData)
   {
@@ -294,7 +316,8 @@ Point veToInflux(String pointName, VEDirectParseMessage parsedMessage, std::map<
 
 void controlInverterByVoltage()
 {
-  const auto &intData = mpptData.getIntData(); // Battery voltage in mV. Using MPPT voltage, since Inv. voltage = 0 when off
+  const auto &intData = mpptData.getIntMap(); // Battery voltage in mV. Using MPPT voltage, since Inv. voltage = 0 when off
+
   auto it = intData.find("V");
   if (it == intData.end())
   {
@@ -353,12 +376,12 @@ void controlLight()
   case ON:
     digitalWrite(RELAY2, HIGH); // Relay is NO
     break;
-  
+
   case OFF:
     digitalWrite(RELAY2, LOW); // Relay is NO
     break;
 
   default:
     break;
-  } 
+  }
 }

@@ -3,7 +3,7 @@
 #include <Arduino.h>
 
 /**
- * @brief Parse a VE.Direct message block and store fields a map.
+ * @brief Parse a VE.Direct message block and store fields to maps.
  *
  *        Each character in the message is appended to a label or value,
  *        except if one of these special characters:
@@ -24,25 +24,24 @@ class VEDirectParseMessage
 private:
     std::map<String, int> numData;
     std::map<String, String> txtData;
-    void parseMessag(const String &message);
+    void parseMessage(const String &message);
     void storeField(const String &label, const String &value);
+    bool isInt(String value);
 
 public:
     explicit VEDirectParseMessage();
-    std::map<String, String> parseAsString(String message);
-    std::map<String, int> parseAsInt(String message);
 
-    std::map<String, int> getIntData() const;
-    std::map<String, String> getStringData() const;
+    bool stringToMap(String message);
+
+    std::map<String, int> getIntMap() const;
+    std::map<String, String> getStringMap() const;
 };
-
 
 VEDirectParseMessage::VEDirectParseMessage()
 {
 }
 
-
-void VEDirectParseMessage::parseMessag(const String &message)
+void VEDirectParseMessage::parseMessage(const String &message)
 {
     String fieldLabel;
     String fieldValue;
@@ -81,30 +80,49 @@ void VEDirectParseMessage::parseMessag(const String &message)
 
 void VEDirectParseMessage::storeField(const String &label, const String &value)
 {
-    txtData[label] = value;
-
-    if (value.length() > 0 && isDigit(value[0])) // If value is numeric, also save it to the int map
+    if (isInt(value))
+    {
         numData[label] = value.toInt();
+    }
+    else
+    {
+        txtData[label] = value;
+    }
 }
 
-std::map<String,int> VEDirectParseMessage::parseAsInt(String message) {
+bool VEDirectParseMessage::isInt(String value)
+{
+    if (value.isEmpty())
+        return false;
+
+    for (int i = 0; i < value.length(); i++)
+    {
+        if (i == 0 && value[i] == '-')
+            continue;
+        if (!isdigit(value[i]))
+            return false;
+    }
+    return true;
+}
+
+bool VEDirectParseMessage::stringToMap(String message)
+{
     txtData.clear();
     numData.clear();
-    parseMessag(message);
+    parseMessage(message);
+
+    if (numData.empty() && txtData.empty())
+        return false;
+
+    return true;
+}
+
+std::map<String, int> VEDirectParseMessage::getIntMap() const
+{
     return numData;
 }
 
-std::map<String,String> VEDirectParseMessage::parseAsString(String message) {
-    txtData.clear();
-    numData.clear();
-    parseMessag(message);
-    return txtData;
-}
-
-std::map<String, int> VEDirectParseMessage::getIntData() const {
-    return numData;
-}
-
-std::map<String, String> VEDirectParseMessage::getStringData() const {
+std::map<String, String> VEDirectParseMessage::getStringMap() const
+{
     return txtData;
 }

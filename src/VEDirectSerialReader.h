@@ -1,13 +1,15 @@
 /**
- * @file VEDirectSerialReader.h
+ * @file  VEDirectSerialReader.h
  * @brief Reads the latest message from a VE.Direct device via Serial,
  *        verifies the message checksum,
  *        and returns the message as a String
  *
+ *        update()      If there is new data in the serial buffer, save the last message to lastMessage
+ *        getMessage()  Return the contents of lastMessage as a String
+ *
  * @note The Serial buffer is read as-is. The latest message block is determined by
  *       locating an occurrence of "\r\nPID" followed by "Checksum".
  */
-
 
 #pragma once
 #include <Arduino.h>

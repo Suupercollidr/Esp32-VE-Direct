@@ -31,11 +31,15 @@ std::map<String, String> VEDirectDecoder::VEDirectCodeMapToHumanReadable(const s
 
     for (const auto &entry : rawData)
     {
-        String humanReadableMessage =  VEDirectCodeToHumanReadable(entry.first, entry.second);
-        String displayName = displayNames.at(entry.first);
+        String humanReadableMessage = VEDirectCodeToHumanReadable(entry.first, entry.second);
+        String displayName;
+
+        auto displayIt = displayNames.find(entry.first);
+        displayName = (displayIt != displayNames.end()) ? displayIt->second : String("_" + entry.first);
+
         if (!humanReadableMessage.isEmpty())
             result[displayName] = humanReadableMessage;
-    }   
+    }
     return result;
 }
 
@@ -81,7 +85,7 @@ String VEDirectDecoder::lookupMessages(const String &label,
     auto it = codesMap.find(label);
     if (it == codesMap.end())
     {
-        eventLog.log(String("Unknown label " + label), EventLogger::LogLevel::ERROR);
+        eventLog.log(String("Okänd etikett " + label), EventLogger::LogLevel::ERROR);
         return "Okänd label: " + label;
     }
     const std::map<int, String> &codeMap = it->second;

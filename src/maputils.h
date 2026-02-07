@@ -9,21 +9,14 @@
 #pragma once
 #include <map>
 
+/*
 // function to any type of maps, as long as both are same type 
 template <typename BOSSE, typename KURT>
 void mergeMaps(const std::map<BOSSE, KURT> &source, std::map<BOSSE, KURT> &destination)
 {
   for (const auto &pair : source)
-    destination.insert(pair);
+  destination.insert(pair);
 }
+*/
 
-// Variable types used for different über-complex maps
-struct labelsAndUnits
-{
-  String displayName;
-  String unit;
-  int conversionFactor;
-};
-
-using NameUnitMap = std::map<String, labelsAndUnits>;
 using CodeMap = std::map<String, std::map<int, String>>;

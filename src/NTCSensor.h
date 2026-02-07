@@ -13,6 +13,9 @@
 #pragma once
 #include <Arduino.h> // For pinMode, digitalWrite, analogRead
 #include <optional>
+#include "EventLogger.h"
+
+extern EventLogger eventLog;
 
 class NTCSensor
 {
@@ -74,7 +77,7 @@ public:
         }
         else
         {
-            //logEvent("No reasonable temperature from NTC", "WARNING"); // TODO: get ntc number or whatever in log message
+            eventLog.log("Orealistisk temperatur från NTC (" + String(roundedTemperature) + "°C)", EventLogger::LogLevel::WARNING);
             return std::nullopt;
         }
     }
