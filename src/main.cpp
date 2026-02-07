@@ -20,6 +20,7 @@
 #include "VEDirectSerialReader.h"
 #include "VEDirectParseMessage.h"
 #include "VEDirectDecoder.h"
+#include "SunTimes.h"
 // #include "configuration.h"
 #include "dev_configuration.h"
 
@@ -42,6 +43,8 @@ VEDirectParseMessage mpptData;
 
 ESPNowReceiver greenhouseData;
 
+SunTimes sol(latitude, longitude, tzid);
+
 uint32_t lastUpdate = millis();
 uint32_t lastInverterPowerChange = millis();
 
@@ -55,6 +58,7 @@ enum powerSwitch
 };
 
 powerSwitch inverterPowerState;
+powerSwitch xmasLightState;
 
 /*
 According to VE.Direct documentation, these are the maximum sizes:
@@ -81,6 +85,7 @@ Point sysStatsToInflux();
 Point houseStatsToInflux();
 Point veToInflux(String pointName, VEDirectParseMessage parsedMessage, std::map<String, int> conversionFactors, std::map<String, String> displayNames, CodeMap codes);
 void controlInverterByVoltage();
+void controlLight();
 
 void setup()
 {
@@ -150,6 +155,7 @@ void loop()
   if (millis() >= lastUpdate + (UPDATE_INTERVAL * 1000))
   {
     controlInverterByVoltage(); // Turn off fridge if power is low
+    controlLight();
 
     inverterData.parseAsInt(victronInverter.getMessage());
     mpptData.parseAsInt(victronMppt.getMessage());
@@ -246,17 +252,18 @@ Point sysStatsToInflux()
 
 Point houseStatsToInflux()
 {
-  Point houseStats("House");
+  Point houseStats("Huvudbyggnad");
   if (auto temperature = ntcSensor1.temperature(); temperature.has_value())
-    houseStats.addField("Refrig_temp", temperature.value());
+    houseStats.addField("Temp_kyl", temperature.value());
 
   if (auto temperature = ntcSensor2.temperature(); temperature.has_value())
-    houseStats.addField("Freezer_temp", temperature.value());
+    houseStats.addField("Temp_frys", temperature.value());
 
-  houseStats.addField("Room_temp_1", dhtSensorRoom.getTemperature());
-  houseStats.addField("Humidity_1", dhtSensorRoom.getHumidity());
+  houseStats.addField("Rumstemp_1", dhtSensorRoom.getTemperature());
+  houseStats.addField("Luftfukt_1", dhtSensorRoom.getHumidity());
 
   houseStats.addField("Inverter", inverterPowerState);
+  houseStats.addField("Julbelysning", xmasLightState);
 
   return houseStats;
 }
@@ -287,7 +294,7 @@ Point veToInflux(String pointName, VEDirectParseMessage parsedMessage, std::map<
 
 void controlInverterByVoltage()
 {
-  const auto &intData = mpptData.getIntData();  // Battery voltage in mV. Using MPPT voltage, since Inv. voltage = 0 when off
+  const auto &intData = mpptData.getIntData(); // Battery voltage in mV. Using MPPT voltage, since Inv. voltage = 0 when off
   auto it = intData.find("V");
   if (it == intData.end())
   {
@@ -327,4 +334,31 @@ void controlInverterByVoltage()
     eventLog.log("Inverter slogs på, tillräcklig batterispänning ", EventLogger::LogLevel::INFO);
     return;
   }
+}
+
+void controlLight()
+{
+  time_t now;
+  time(&now);
+  struct tm *timeinfo = localtime(&now);
+
+  const bool isXmas = (timeinfo->tm_mon == 11 && timeinfo->tm_mday >= 1) || (timeinfo->tm_mon == 0 && timeinfo->tm_mday <= 13);
+  const bool isDark = !sol.isSunUp();
+  const bool isDay = (timeinfo->tm_hour >= 8) && (timeinfo->tm_hour < 20);
+
+  xmasLightState = (isXmas && isDark && isDay) ? ON : OFF;
+
+  switch (xmasLightState)
+  {
+  case ON:
+    digitalWrite(RELAY2, HIGH); // Relay is NO
+    break;
+  
+  case OFF:
+    digitalWrite(RELAY2, LOW); // Relay is NO
+    break;
+
+  default:
+    break;
+  } 
 }
