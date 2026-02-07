@@ -206,47 +206,6 @@ void initWiFi() // Connect to WiFi
   eventLog.log(String("Connected to WiFi " + String(ssid) + " (channel: " + WiFi.channel() + ")"), EventLogger::LogLevel::INFO);
 }
 
-void sendHouseToInflux()
-{
-  storeDataToNvs("lastState", "sendHouseToInflux");
-  Point dataPoint("SolarPower");
-
-  for (auto const &entry : numSensorData) // Go through all values in numSensorData
-  {
-    String label = entry.first;
-    int value = entry.second;
-
-    if (!mapLabelDisplaynameUnit.count(label) > 0)
-      continue; // Only send values if they exist in 'mapLabelDisplaynameUnit'
-
-    auto conversionFactor = mapLabelDisplaynameUnit.at(label).conversionFactor;
-
-    if (conversionFactor == 1) // Exactly 1 means no conversion, send int
-      dataPoint.addField(label, value);
-
-    if (conversionFactor > 1) // More than 1, divide by conversion factor to get reasonable unit (for example, convert mV to V)
-      dataPoint.addField(label, static_cast<double>(value) / conversionFactor);
-
-    if (conversionFactor == 0) //  0: Status or code
-    {
-      dataPoint.addField(label, value); // Send original value as int (no float for error codes)
-    }
-  }
-
-  for (auto const &entry : humSensorData)
-    dataPoint.addField(entry.first, entry.second);
-
-  const bool influxDbResponse = influxClient.writePoint(dataPoint); // Send data point to InfluxDB
-  Serial.print("Sending solar data to InfluxDB");
-  if (!influxDbResponse)
-  {
-    Serial.println(" failed.");
-    eventLog.log(influxClient.getLastErrorMessage(), EventLogger::LogLevel::ERROR);
-    return;
-  }
-  Serial.println(" successful.");
-}
-
 Point greenhouseToInflux(GreenhouseSensorData data)
 {
   storeDataToNvs("lastState", "greenhouseToInflux");
@@ -322,66 +281,6 @@ Point veToInflux(String pointName, VEDirectSerialReader device, std::map<String,
 
   return newPoint;
 }
-
-/*
-bool collectSensorData()
-{
-  storeDataToNvs("lastState", "collectSensorData");
-  numSensorData.clear();
-  humSensorData.clear();
-
-  // Current time
-  time(&now);
-  char strTimestamp[20];
-
-  numSensorData["TIMESTAMP"] = now;
-  humSensorData["Time"] = strftime(strTimestamp, sizeof(strTimestamp), "%Y-%m-%d %H:%M:%S", localtime(&now));
-
-  // ESP statistics and performance
-  numSensorData["ESP_UPTIME"] = millis();
-  numSensorData["ESP_MEM_FREE"] = ESP.getFreeHeap();
-  numSensorData["ESP_MEM_LOWEST"] = ESP.getMinFreeHeap();
-  numSensorData["ESP_PSRAM_FREE"] = ESP.getFreePsram();
-  numSensorData["ESP_PSRAM_LOWEST"] = ESP.getFreePsram();
-
-  // States
-  numSensorData["CTRL_INV_ON"] = static_cast<int>(inverterPowerState);
-
-  // Sensor data
-  if (victronInverter.update())
-  {
-    String inverterData = victronInverter.getMessage();
-    VEDirectParseMessage intMessage("INV");
-    std::map<String, int> intData = intMessage.parseAsInt(inverterData);
-    mergeMaps(intData, numSensorData);
-  }
-  if (victronMppt.update())
-  {
-    String mpptData = victronMppt.getMessage();
-    VEDirectParseMessage intMessage("MPPT");
-    std::map<String, int> intData = intMessage.parseAsInt(mpptData);
-    mergeMaps(intData, numSensorData);
-  }
-
-  // Get human-readable messages for any staus codes that exist in LableCodeMappings
-  VEDirectDecoder messageDecoder(mapLabelDisplaynameUnit, mapLabelCodeText);
-  std::map<String, String> decodedMessages = messageDecoder.VEDirectCodeMapToHumanReadable(numSensorData);
-  mergeMaps(decodedMessages, humSensorData);
-
-
-  // NTC sensors
-  if (auto temperature = ntcSensor1.temperature(); temperature.has_value())
-    numSensorData["ENV_REFRIG_TEMP"] = *temperature;
-
-  if (auto temperature = ntcSensor2.temperature(); temperature.has_value())
-    numSensorData["ENV_FREEZER_TEMP"] = *temperature;
-
-  numSensorData["ENV_ROOM_TEMP"] = dhtSensorRoom.getTemperature();
-  numSensorData["ENV_ROOM_HUMID"] = dhtSensorRoom.getHumidity();
-
-  return true;
-}
-*/
 
 void controlInverterByVoltage()
 {
