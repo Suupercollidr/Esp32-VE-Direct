@@ -24,6 +24,9 @@ void VEDirectSerialReader::copySerialBufferToRingBuffer()
 
         if (RingBufferWritePos >= BUFFER_SIZE)
             RingBufferWritePos = 0;
+        
+        if (!serial.available())
+            delay(1);  // Give device a chance to finish 
     }
 }
 
@@ -70,7 +73,7 @@ char *VEDirectSerialReader::messageToLinearBuffer(const char *ringBuffer, size_t
     else
         messageLength = (BUFFER_SIZE - start) + end; // Meddelandet sträcker sig över buffertens slut
 
-    Serial.println("Meddelandet är " + String(messageLength) + " tecken långt");
+    // Serial.println("Meddelandet är " + String(messageLength) + " tecken långt");
 
     // Allokera en ny buffer för meddelandet (+1 för \0 om du vill)
     char *messageBuffer = new char[messageLength + 1];
@@ -95,7 +98,7 @@ char *VEDirectSerialReader::messageToLinearBuffer(const char *ringBuffer, size_t
     for (int i = 0; i < messageLength; i++)
     {
         char j = messageBuffer[i];
-        Serial.print(j);
+        // Serial.print(j);
     }
     /*
     Serial.println();
@@ -115,7 +118,7 @@ bool VEDirectSerialReader::verifyChecksum(const char *message, size_t length)
         return false;
 
     uint8_t sum = 0;
-    Serial.println("Meddelandet är " + String(length) + " tecken långt.");
+    // Serial.println("Meddelandet är " + String(length) + " tecken långt.");
 
     for (size_t i = 0; i < length; i++)
     {
@@ -125,9 +128,9 @@ bool VEDirectSerialReader::verifyChecksum(const char *message, size_t length)
         // Serial.printf("%d, ", thisByte);                     // skriv ut som tal
     }
 
-    Serial.println();
-    Serial.println("Summa inkl. checksum (ska vara 0): " + String(sum));
-    Serial.println(static_cast<uint8_t>(message[length - 1]));
+    // Serial.println();
+    // Serial.println("Summa inkl. checksum (ska vara 0): " + String(sum));
+    // Serial.println(static_cast<uint8_t>(message[length - 1]));
 
     return (sum == 0);
 }
@@ -137,9 +140,10 @@ bool VEDirectSerialReader::update()
 
     if (!serial.available())
     {
-        Serial.print(".");
+        Serial.print("░");
         return false;
     }
+
     size_t start, end, length;
 
     copySerialBufferToRingBuffer();

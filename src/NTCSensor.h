@@ -77,7 +77,7 @@ public:
         }
         else
         {
-            eventLog.log("Orealistisk temperatur från NTC (" + String(roundedTemperature) + "°C)", EventLogger::LogLevel::WARNING);
+            eventLog.log("Orealistisk temperatur från NTC på pin " + String(readPin) + " (" + String(roundedTemperature) + "°C)", EventLogger::LogLevel::WARNING);
             return std::nullopt;
         }
     }

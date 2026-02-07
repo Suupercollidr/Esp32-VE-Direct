@@ -146,8 +146,6 @@ void loop()
   localWebServer.handleClient();
   ElegantOTA.loop();
 
-  victronInverter.update();
-
   if (victronInverter.update())
     Serial.println("Tog emot ny data från inverter");
 
@@ -159,7 +157,7 @@ void loop()
   // Send data at regular intervals
   if (millis() >= lastUpdate + (UPDATE_INTERVAL * 1000))
   {
-    Serial.println("Samlar ihop och skickar data till Influx");
+    Serial.println("\nSamlar ihop och skickar data till Influx");
     storeDataToNvs("lastState", "Send data triggered");
 
     controlInverterByVoltage(); // Turn off fridge if power is low
@@ -193,9 +191,9 @@ void loop()
   }
 
   // Send all gathered data to InfluxDB
-  Serial.println("Skickar till Influx: ");
   for (auto &thisPoint : influxPoints)
   {
+    Serial.println("Skickar till Influx: ");
     const bool influxDbResponse = influxClient.writePoint(thisPoint); // Send data point to InfluxDB
     Serial.println(thisPoint.toLineProtocol());
 
