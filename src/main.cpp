@@ -231,14 +231,14 @@ Point greenhouseToInflux(GreenhouseSensorData data)
   storeDataToNvs("lastState", "greenhouseToInflux");
 
   Point dataPoint("Greenhouse");
-  dataPoint.addField("indoorTemp", data.indoorTemp);
-  dataPoint.addField("indoorHumidity", data.indoorHumidity);
-  dataPoint.addField("outdoorTemp", data.outdoorTemp);
-  dataPoint.addField("soilTemp1", data.soilTemp1);
-  dataPoint.addField("soilTemp2", data.soilTemp2);
+  dataPoint.addField("indoorTemp", (data.indoorTemp / 10.0));
+  dataPoint.addField("indoorHumidity", (data.indoorHumidity / 10.0));
+  dataPoint.addField("outdoorTemp", (data.outdoorTemp / 10.0));
+  dataPoint.addField("soilTemp1", (data.soilTemp1 / 10.0));
+  dataPoint.addField("soilTemp2", (data.soilTemp2 / 10.0));
   dataPoint.addField("soilMoisture1", data.soilMoisture1);
   dataPoint.addField("soilMoisture2", data.soilMoisture2);
-  dataPoint.addField("batteryVoltage", data.batteryVoltage);
+  dataPoint.addField("batteryVoltage", (data.batteryVoltage / 1000.0));
 
   dataPoint.addField("climateSensorStatus", data.status.ClimateSensorStatus);
   dataPoint.addField("soilSensor1Status", data.status.SoilSensor1Status);
