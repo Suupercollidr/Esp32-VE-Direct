@@ -11,6 +11,7 @@
 #include <map>
 #include "maputils.h"
 
+/*
 // Map value labels to human-readable display name names and units
 // Label, human-readable name, unit, conversion factor (0 for non-numerical values)
 const NameUnitMap mapLabelDisplaynameUnit{
@@ -184,6 +185,10 @@ const CodeMap mapLabelCodeText{
          {0x00000100, "Analyserar inkommande spänning"},
      }},
 };
+
+*/
+
+
 
 // Refactor
 // using CodeMap = std::map<String, std::map<int, String>>;
