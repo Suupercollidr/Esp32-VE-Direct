@@ -37,6 +37,9 @@ NTCSensor ntcSensor2(NTC_POWER_PIN, NTC2_READ_PIN);
 VEDirectSerialReader victronInverter(Serial1);
 VEDirectSerialReader victronMppt(Serial2);
 
+VEDirectParseMessage inverterData;
+VEDirectParseMessage mpptData;
+
 ESPNowReceiver greenhouseData;
 
 uint32_t lastUpdate = millis();
@@ -53,12 +56,9 @@ enum powerSwitch
 
 powerSwitch inverterPowerState;
 
-std::map<String, int> numSensorData;    // Numerical data
-std::map<String, String> humSensorData; // Human-readable data
-
 /*
 According to VE.Direct documentation, these are the maximum sizes:
-  Field label: 9 bytes (though with prefixes like "VE_MPPT_", let's make it an even 20 or something)
+  Field label: 9 bytes
   Field value: 33 bytes
   Message size: 22 fields (like 2 * 22 + like 10 other non-VE fields makes that like 60)
 
@@ -78,8 +78,8 @@ bool collectSensorData();
 void sendHouseToInflux();
 Point greenhouseToInflux(GreenhouseSensorData data);
 Point sysStatsToInflux();
-Point houseClimateToInflux();
-Point veToInflux(String pointName, VEDirectSerialReader device, std::map<String, int> conversionFactors, std::map<String, String> displayNames, CodeMap codes, String prefix = "");
+Point houseStatsToInflux();
+Point veToInflux(String pointName, VEDirectParseMessage parsedMessage, std::map<String, int> conversionFactors, std::map<String, String> displayNames, CodeMap codes);
 void controlInverterByVoltage();
 
 void setup()
@@ -151,12 +151,15 @@ void loop()
   {
     controlInverterByVoltage(); // Turn off fridge if power is low
 
+    inverterData.parseAsInt(victronInverter.getMessage());
+    mpptData.parseAsInt(victronMppt.getMessage());
+
     // Victron VE.Direct units
-    influxPoints.emplace_back(veToInflux("Inverter", victronInverter, inverterConversions, inverterDisplayNames, inverterCodes));
-    influxPoints.emplace_back(veToInflux("MPPT", victronMppt, mpptConversions, mpptDisplayNames, mpptCodes));
+    influxPoints.emplace_back(veToInflux("Inverter", inverterData, inverterConversions, inverterDisplayNames, inverterCodes));
+    influxPoints.emplace_back(veToInflux("MPPT", mpptData, mpptConversions, mpptDisplayNames, mpptCodes));
 
     influxPoints.emplace_back(sysStatsToInflux());
-    influxPoints.emplace_back(houseClimateToInflux());
+    influxPoints.emplace_back(houseStatsToInflux());
 
     lastUpdate = millis();
   }
@@ -241,27 +244,27 @@ Point sysStatsToInflux()
   return sysStats;
 }
 
-Point houseClimateToInflux()
+Point houseStatsToInflux()
 {
-  Point houseClimate("House_climate");
+  Point houseStats("House");
   if (auto temperature = ntcSensor1.temperature(); temperature.has_value())
-    houseClimate.addField("Refrig_temp", temperature.value());
+    houseStats.addField("Refrig_temp", temperature.value());
 
   if (auto temperature = ntcSensor2.temperature(); temperature.has_value())
-    houseClimate.addField("Freezer_temp", temperature.value());
+    houseStats.addField("Freezer_temp", temperature.value());
 
-  houseClimate.addField("Room_temp_1", dhtSensorRoom.getTemperature());
-  houseClimate.addField("Humidity_1", dhtSensorRoom.getHumidity());
+  houseStats.addField("Room_temp_1", dhtSensorRoom.getTemperature());
+  houseStats.addField("Humidity_1", dhtSensorRoom.getHumidity());
 
-  return houseClimate;
+  houseStats.addField("Inverter", inverterPowerState);
+
+  return houseStats;
 }
 
-Point veToInflux(String pointName, VEDirectSerialReader device, std::map<String, int> conversionFactors, std::map<String, String> displayNames, CodeMap codes, String prefix)
+Point veToInflux(String pointName, VEDirectParseMessage parsedMessage, std::map<String, int> conversionFactors, std::map<String, String> displayNames, CodeMap codes)
 {
   Point newPoint(pointName);
-  String originalMessage = device.getMessage();
-  VEDirectParseMessage parsedMessage(prefix);
-  std::map<String, int> intData = parsedMessage.parseAsInt(originalMessage);
+  const auto &intData = parsedMessage.getIntData();
   VEDirectDecoder decoder(displayNames, codes);
   std::map<String, String> decodedMessages = decoder.VEDirectCodeMapToHumanReadable(intData);
 
@@ -284,13 +287,20 @@ Point veToInflux(String pointName, VEDirectSerialReader device, std::map<String,
 
 void controlInverterByVoltage()
 {
-  const int voltage = numSensorData["VE_MPPT_V"]; // Battery voltage in mV. Using MPPT voltage, since Inv. voltage = 0 when off
+  const auto &intData = mpptData.getIntData();  // Battery voltage in mV. Using MPPT voltage, since Inv. voltage = 0 when off
+  auto it = intData.find("V");
+  if (it == intData.end())
+  {
+    eventLog.log("Hittade ingen batterispänning från MPPT", EventLogger::LogLevel::WARNING);
+    return;
+  }
+  const int voltage = it->second;
 
   // If state changed more recent than retry period, do nothing
   if (millis() - lastInverterPowerChange < (INV_RETRY_PERIOD * 1000))
     return;
 
-  // Do nothing on coco-bananas values
+  // Do nothing on coco-bananas values (<1 V or >20 V)
   if (voltage < 1000 || voltage > 20000)
   {
     String messageText = "Orealistikt spänningsvärde (" + String(voltage) + " mV), ändrar inte status på inverter";
