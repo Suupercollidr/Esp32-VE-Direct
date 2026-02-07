@@ -32,7 +32,7 @@ std::map<String, String> VEDirectDecoder::VEDirectCodeMapToHumanReadable(const s
     for (const auto &entry : rawData)
     {
         String humanReadableMessage =  VEDirectCodeToHumanReadable(entry.first, entry.second);
-        String displayName = namesMap.at(entry.first).displayName;
+        String displayName = displayNames.at(entry.first);
         if (!humanReadableMessage.isEmpty())
             result[displayName] = humanReadableMessage;
     }   

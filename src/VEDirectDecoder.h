@@ -9,15 +9,15 @@
 class VEDirectDecoder
 {
 public:
-    explicit VEDirectDecoder(const NameUnitMap &mapLabelDisplaynameUnit,
+    explicit VEDirectDecoder(const std::map<String, String> &displayNames,
                              const CodeMap &mapLabelCodeText)
-        : namesMap(mapLabelDisplaynameUnit), codesMap(mapLabelCodeText) {}
+        : displayNames(displayNames), codesMap(mapLabelCodeText) {}
 
     String VEDirectCodeToHumanReadable(const String &label, int value);
     std::map<String, String> VEDirectCodeMapToHumanReadable(const std::map<String, int> &rawData);
 
 private:
-    NameUnitMap namesMap;
+    std::map<String, String> displayNames;
     CodeMap codesMap;
 
     std::vector<int> findCodes(const String &label, int value);

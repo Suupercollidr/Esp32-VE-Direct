@@ -1,6 +1,5 @@
 /**
  * @file SunTimes.h
- * @author your name (you@domain.com)
  * @brief Retrieves the time for sunrise and sunet 
  * for a specific longitude, latitude, and time zone 
  * and returns the number of minutes since the sun rose or set, 

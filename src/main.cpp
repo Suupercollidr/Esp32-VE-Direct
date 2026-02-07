@@ -76,7 +76,10 @@ const char *getResetReason(esp_reset_reason_t);
 void initWiFi();
 bool collectSensorData();
 void sendHouseToInflux();
-void sendGreenhouseToInflux(GreenhouseSensorData data);
+Point greenhouseToInflux(GreenhouseSensorData data);
+Point sysStatsToInflux();
+Point houseClimateToInflux();
+Point veToInflux(String pointName, VEDirectSerialReader device, std::map<String, int> conversionFactors, std::map<String, String> displayNames, CodeMap codes, String prefix = "");
 void controlInverterByVoltage();
 
 void setup()
@@ -96,11 +99,14 @@ void setup()
   pinMode(RELAY1, OUTPUT);
   pinMode(RELAY2, OUTPUT);
   pinMode(RELAY3, OUTPUT);
-  
+
   greenhouseData.begin();
+
   initWiFi();
+
   timeSync(TIME_ZONE, NTP_SERVER1, NTP_SERVER2, NTP_SERVER3);
 
+  // OTA
   localWebServer.on("/", []()
                     { localWebServer.send(200, "text/plain", "Tere tulemast Eesti saatkonda!"); });
   ElegantOTA.begin(&localWebServer);
@@ -108,7 +114,7 @@ void setup()
   eventLog.log(String("Webbserver startad på " + String(WiFi.localIP())), EventLogger::LogLevel::INFO);
 
   if (!influxClient.validateConnection())
-    eventLog.log(String("Kunde inte ansluta till Influx DB på " + influxClient.getServerUrl() + "\nFelmeddelande: " + influxClient.getLastErrorMessage()), EventLogger::LogLevel::ERROR);
+    eventLog.log(String("Kunde inte ansluta till Influx DB på " + influxClient.getServerUrl() + "\nFelmeddelande:\n" + influxClient.getLastErrorMessage()), EventLogger::LogLevel::ERROR);
 
   dhtSensorRoom.setup(DHT_PIN, DHTesp::DHT11);
 
@@ -126,17 +132,32 @@ void loop()
   storeDataToNvs("lastState", "Loop");
 
   if (WiFi.status() != WL_CONNECTED)
+  {
     WiFi.reconnect();
+    delay(50);
+    eventLog.log("Återanslöt till WiFi", EventLogger::LogLevel::INFO);
+  }
+
+  localWebServer.handleClient();
+  ElegantOTA.loop();
 
   victronInverter.update();
   victronMppt.update();
 
-  // Fetch VE.Direct data at regular intervals
+  std::vector<Point> influxPoints;
+
+  // Send data at regular intervals
   if (millis() >= lastUpdate + (UPDATE_INTERVAL * 1000))
   {
-    collectSensorData();
     controlInverterByVoltage(); // Turn off fridge if power is low
-    sendHouseToInflux();
+
+    // Victron VE.Direct units
+    influxPoints.emplace_back(veToInflux("Inverter", victronInverter, inverterConversions, inverterDisplayNames, inverterCodes));
+    influxPoints.emplace_back(veToInflux("MPPT", victronMppt, mpptConversions, mpptDisplayNames, mpptCodes));
+
+    influxPoints.emplace_back(sysStatsToInflux());
+    influxPoints.emplace_back(houseClimateToInflux());
+
     lastUpdate = millis();
   }
 
@@ -146,11 +167,24 @@ void loop()
     Serial.println("Received data from greenhouse");
     auto data = greenhouseData.getData();
     greenhouseData.clearNewDataFlag();
-    sendGreenhouseToInflux(data);
+    influxPoints.emplace_back(greenhouseToInflux(data));
   }
 
-  localWebServer.handleClient();
-  ElegantOTA.loop();
+  // Send all gathered data to InfluxDB
+  for (auto &thisPoint : influxPoints)
+  {
+    const bool influxDbResponse = influxClient.writePoint(thisPoint); // Send data point to InfluxDB
+    Serial.print("Sending point to InfluxDB");
+    if (!influxDbResponse)
+    {
+      Serial.println(" failed.");
+      Serial.print("This point failed:");
+      Serial.println(thisPoint.toLineProtocol());
+      eventLog.log(influxClient.getLastErrorMessage(), EventLogger::LogLevel::ERROR);
+      continue;
+    }
+    Serial.println(" successful.");
+  }
 
   yield();
 }
@@ -213,9 +247,9 @@ void sendHouseToInflux()
   Serial.println(" successful.");
 }
 
-void sendGreenhouseToInflux(GreenhouseSensorData data)
+Point greenhouseToInflux(GreenhouseSensorData data)
 {
-  storeDataToNvs("lastState", "sendGreenhouseToInflux");
+  storeDataToNvs("lastState", "greenhouseToInflux");
 
   Point dataPoint("Greenhouse");
   dataPoint.addField("indoorTemp", data.indoorTemp);
@@ -232,17 +266,64 @@ void sendGreenhouseToInflux(GreenhouseSensorData data)
   dataPoint.addField("soilSensor2Status", data.status.SoilSensor2Status);
   dataPoint.addField("oneWireDeviceCount", data.status.OneWireDeviceCount);
 
-  const bool influxDbResponse = influxClient.writePoint(dataPoint); // Send data point to InfluxDB
-  Serial.print("Sending greenhouse data to InfluxDB");
-  if (!influxDbResponse)
-  {
-    Serial.println(" failed.");
-    eventLog.log(influxClient.getLastErrorMessage(), EventLogger::LogLevel::ERROR);
-    return;
-  }
-  Serial.println(" successful.");
+  return dataPoint;
 }
 
+Point sysStatsToInflux()
+{
+  Point sysStats("ESP");
+  time(&now);
+  sysStats.addField("Timestamp", now);
+  sysStats.addField("Uptime", millis());
+  sysStats.addField("Mem_free", ESP.getFreeHeap());
+  sysStats.addField("PSRAM_free", ESP.getFreePsram());
+  sysStats.addField("PSRAM_lowest", ESP.getMinFreePsram());
+
+  return sysStats;
+}
+
+Point houseClimateToInflux()
+{
+  Point houseClimate("House_climate");
+  if (auto temperature = ntcSensor1.temperature(); temperature.has_value())
+    houseClimate.addField("Refrig_temp", temperature.value());
+
+  if (auto temperature = ntcSensor2.temperature(); temperature.has_value())
+    houseClimate.addField("Freezer_temp", temperature.value());
+
+  houseClimate.addField("Room_temp_1", dhtSensorRoom.getTemperature());
+  houseClimate.addField("Humidity_1", dhtSensorRoom.getHumidity());
+
+  return houseClimate;
+}
+
+Point veToInflux(String pointName, VEDirectSerialReader device, std::map<String, int> conversionFactors, std::map<String, String> displayNames, CodeMap codes, String prefix)
+{
+  Point newPoint(pointName);
+  String originalMessage = device.getMessage();
+  VEDirectParseMessage parsedMessage(prefix);
+  std::map<String, int> intData = parsedMessage.parseAsInt(originalMessage);
+  VEDirectDecoder decoder(displayNames, codes);
+  std::map<String, String> decodedMessages = decoder.VEDirectCodeMapToHumanReadable(intData);
+
+  for (auto const &[key, val] : intData)
+  {
+    if (conversionFactors.count(key))
+    {
+      float floatVal = val / conversionFactors.at(key);
+      newPoint.addField(key, floatVal);
+      continue;
+    }
+    newPoint.addField(key, val);
+  }
+
+  for (auto const &[key, val] : decodedMessages)
+    newPoint.addField(key, val);
+
+  return newPoint;
+}
+
+/*
 bool collectSensorData()
 {
   storeDataToNvs("lastState", "collectSensorData");
@@ -287,6 +368,7 @@ bool collectSensorData()
   std::map<String, String> decodedMessages = messageDecoder.VEDirectCodeMapToHumanReadable(numSensorData);
   mergeMaps(decodedMessages, humSensorData);
 
+
   // NTC sensors
   if (auto temperature = ntcSensor1.temperature(); temperature.has_value())
     numSensorData["ENV_REFRIG_TEMP"] = *temperature;
@@ -299,6 +381,7 @@ bool collectSensorData()
 
   return true;
 }
+*/
 
 void controlInverterByVoltage()
 {
