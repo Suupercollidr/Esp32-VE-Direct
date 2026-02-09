@@ -20,8 +20,7 @@
 #include "VEDirectSerialReader.h"
 #include "VEDirectParseMessage.h"
 #include "VEDirectDecoder.h"
-#include "SunTimes.h"
-// #include "configuration.h"
+//#include "configuration.h"
 #include "dev_configuration.h"
 
 WebServer localWebServer(80);
@@ -42,8 +41,6 @@ VEDirectParseMessage inverterData;
 VEDirectParseMessage mpptData;
 
 ESPNowReceiver greenhouseData;
-
-SunTimes sol(latitude, longitude, tzid);
 
 uint32_t lastUpdate = millis();
 uint32_t lastInverterPowerChange = millis();
@@ -359,12 +356,22 @@ void controlInverterByVoltage()
 
 void controlLight()
 {
+  const auto &intData = mpptData.getIntMap(); // Contains panel voltage (VPV) in mV
+
+  auto it = intData.find("VPV");
+  if (it == intData.end())
+  {
+    eventLog.log("Hittade ingen panelspänning från MPPT", EventLogger::LogLevel::WARNING);
+    return;
+  }
+  const int panelVoltage = it->second;
+
   time_t now;
   time(&now);
   struct tm *timeinfo = localtime(&now);
 
   const bool isXmas = (timeinfo->tm_mon == 11 && timeinfo->tm_mday >= 1) || (timeinfo->tm_mon == 0 && timeinfo->tm_mday <= 13);
-  const bool isDark = !sol.isSunUp();
+  const bool isDark = (panelVoltage < 5000);
   const bool isDay = (timeinfo->tm_hour >= 8) && (timeinfo->tm_hour < 20);
 
   xmasLightState = (isXmas && isDark && isDay) ? ON : OFF;

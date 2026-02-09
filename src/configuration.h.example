@@ -24,9 +24,6 @@ IPAddress secondaryDNS(8, 8, 4, 4); // Google secondary DNS
 #define INFLUXDB_DATA_BUCKET "Bucket" // It's pronounced 'Bucket'
 #define INFLUXDB_LOG_BUCKET "Log bucket"
 
-const float latitude = 0.00;
-const float longitude = 0.00; 
-
 // MAC address for transmitting ESP32 (greenhouse)
 uint8_t transmitterMAC[] = {MAC};
 
