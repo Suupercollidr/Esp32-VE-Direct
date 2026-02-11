@@ -54,8 +54,8 @@ enum powerSwitch
   ON
 };
 
-powerSwitch inverterPowerState;
-powerSwitch xmasLightState;
+powerSwitch inverterPowerState = ON;
+powerSwitch xmasLightState = OFF;
 
 /*
 According to VE.Direct documentation, these are the maximum sizes:
@@ -100,7 +100,12 @@ void setup()
 
   pinMode(RELAY1, OUTPUT);
   pinMode(RELAY2, OUTPUT);
-  pinMode(RELAY3, OUTPUT);
+  //pinMode(RELAY3, OUTPUT); 
+  //pinMode(RELAY4, OUTPUT);
+
+  // Make sure relay positions match the corresponding power switch
+  digitalWrite(RELAY1, (inverterPowerState == ON) ? LOW : HIGH ); // NC
+  digitalWrite(RELAY2, (xmasLightState     == ON) ? HIGH : LOW ); // NO
 
   greenhouseData.begin();
 
@@ -113,16 +118,24 @@ void setup()
                     { localWebServer.send(200, "text/plain", "Tere tulemast Eesti saatkonda!"); });
   ElegantOTA.begin(&localWebServer);
   localWebServer.begin();
-  eventLog.log(String("Webbserver startad på " + String(WiFi.localIP())), EventLogger::LogLevel::INFO);
+  IPAddress myIp = WiFi.localIP();
+  const String myIpString = String(myIp[0]) + "." +
+                            String(myIp[1]) + "." +
+                            String(myIp[2]) + "." +
+                            String(myIp[3]);
+
+  eventLog.log(
+      String("Webbserver startad på " + myIpString), EventLogger::LogLevel::INFO);
 
   if (!influxClient.validateConnection())
-    eventLog.log(String("Kunde inte ansluta till Influx DB på " + influxClient.getServerUrl() + "\nFelmeddelande:\n" + influxClient.getLastErrorMessage()), EventLogger::LogLevel::ERROR);
+    eventLog.log(String("Kunde inte ansluta till Influx DB på " + influxClient.getServerUrl() + "\nFelmeddelande:\n" + influxClient.getLastErrorMessage() + "\n"), EventLogger::LogLevel::ERROR);
 
   dhtSensorRoom.setup(DHT_PIN, DHTesp::DHT11);
 
   float setupTime = millis() / 1000;
 
   eventLog.log(String("Systemet startat. Uppstarten tog " + String(setupTime) + " s."), EventLogger::LogLevel::INFO);
+  eventLog.log(String("Lokal IP-adress: " + myIpString), EventLogger::LogLevel::INFO);
   eventLog.log(String("Senaste återställning: " + String(getResetReason(resetReason)) + " (" + String(resetReason) + ")"), EventLogger::LogLevel::INFO);
   eventLog.log(String("Senaste åtgärd: " + lastEventBeforeReboot), EventLogger::LogLevel::INFO);
 
@@ -136,8 +149,8 @@ void loop()
   if (WiFi.status() != WL_CONNECTED)
   {
     WiFi.reconnect();
-    delay(50);
-    eventLog.log("Återanslöt till WiFi", EventLogger::LogLevel::INFO);
+    eventLog.log("Återansluter till WiFi", EventLogger::LogLevel::INFO);
+    delay(500);
   }
 
   localWebServer.handleClient();
@@ -336,7 +349,7 @@ void controlInverterByVoltage()
   // If battery voltage is lower than off voltage, turn inverter off
   if (inverterPowerState == ON && voltage < INV_OFF_VOLTAGE)
   {
-    digitalWrite(RELAY1, HIGH); // Relay is NC
+    digitalWrite(RELAY1, HIGH); // Relay is NC, so triggering it will turn off the inverter
     lastInverterPowerChange = millis();
     inverterPowerState = OFF;
     eventLog.log("Inverter stängdes av, låg batterispänning", EventLogger::LogLevel::INFO);
@@ -346,7 +359,7 @@ void controlInverterByVoltage()
   // If battery voltage is higher than on voltage, turn inverter on
   if (inverterPowerState == OFF && voltage > INV_ON_VOLTAGE)
   {
-    digitalWrite(RELAY1, LOW); // Relay is NC
+    digitalWrite(RELAY1, LOW); // Relay is NC, so releasing it will turn on the inverter
     lastInverterPowerChange = millis();
     inverterPowerState = ON;
     eventLog.log("Inverter slogs på, tillräcklig batterispänning ", EventLogger::LogLevel::INFO);
@@ -354,6 +367,12 @@ void controlInverterByVoltage()
   }
 }
 
+/**
+ * @brief Turns on light (by triggering a relay) when the following conditions are met:
+ *        - It is christmas time (between December 1 and January 13)
+ *        - It is daytime (between 08:00 and 20:00)
+ *        - It is dark (the panel voltage of the photovoltaic panel is < 5000 mV)
+ */
 void controlLight()
 {
   const auto &intData = mpptData.getIntMap(); // Contains panel voltage (VPV) in mV
@@ -364,6 +383,7 @@ void controlLight()
     eventLog.log("Hittade ingen panelspänning från MPPT", EventLogger::LogLevel::WARNING);
     return;
   }
+
   const int panelVoltage = it->second;
 
   time_t now;
