@@ -20,7 +20,7 @@
 #include "VEDirectSerialReader.h"
 #include "VEDirectParseMessage.h"
 #include "VEDirectDecoder.h"
-//#include "configuration.h"
+// #include "configuration.h"
 #include "dev_configuration.h"
 
 WebServer localWebServer(80);
@@ -100,12 +100,12 @@ void setup()
 
   pinMode(RELAY1, OUTPUT);
   pinMode(RELAY2, OUTPUT);
-  //pinMode(RELAY3, OUTPUT); 
-  //pinMode(RELAY4, OUTPUT);
+  // pinMode(RELAY3, OUTPUT);
+  // pinMode(RELAY4, OUTPUT);
 
   // Make sure relay positions match the corresponding power switch
-  digitalWrite(RELAY1, (inverterPowerState == ON) ? LOW : HIGH ); // NC
-  digitalWrite(RELAY2, (xmasLightState     == ON) ? HIGH : LOW ); // NO
+  digitalWrite(RELAY1, (inverterPowerState == ON) ? LOW : HIGH); // NC
+  digitalWrite(RELAY2, (xmasLightState == ON) ? HIGH : LOW);     // NO
 
   greenhouseData.begin();
 
@@ -114,18 +114,10 @@ void setup()
   timeSync(TIME_ZONE, NTP_SERVER1, NTP_SERVER2, NTP_SERVER3);
 
   // OTA
-  localWebServer.on("/", []()
-                    { localWebServer.send(200, "text/plain", "Tere tulemast Eesti saatkonda!"); });
+  localWebServer.on("/", []() { localWebServer.send(200, "text/plain", "Tere tulemast Eesti saatkonda!"); });
   ElegantOTA.begin(&localWebServer);
   localWebServer.begin();
-  IPAddress myIp = WiFi.localIP();
-  const String myIpString = String(myIp[0]) + "." +
-                            String(myIp[1]) + "." +
-                            String(myIp[2]) + "." +
-                            String(myIp[3]);
-
-  eventLog.log(
-      String("Webbserver startad på " + myIpString), EventLogger::LogLevel::INFO);
+  eventLog.log("Webbserver startad", EventLogger::LogLevel::INFO);
 
   if (!influxClient.validateConnection())
     eventLog.log(String("Kunde inte ansluta till Influx DB på " + influxClient.getServerUrl() + "\nFelmeddelande:\n" + influxClient.getLastErrorMessage() + "\n"), EventLogger::LogLevel::ERROR);
@@ -135,7 +127,6 @@ void setup()
   float setupTime = millis() / 1000;
 
   eventLog.log(String("Systemet startat. Uppstarten tog " + String(setupTime) + " s."), EventLogger::LogLevel::INFO);
-  eventLog.log(String("Lokal IP-adress: " + myIpString), EventLogger::LogLevel::INFO);
   eventLog.log(String("Senaste återställning: " + String(getResetReason(resetReason)) + " (" + String(resetReason) + ")"), EventLogger::LogLevel::INFO);
   eventLog.log(String("Senaste åtgärd: " + lastEventBeforeReboot), EventLogger::LogLevel::INFO);
 
@@ -232,8 +223,32 @@ void initWiFi() // Connect to WiFi
 
     Serial.print(".");
   }
+  IPAddress myIp = WiFi.localIP();
+  const String myIpString = String(myIp[0]) + "." +
+                            String(myIp[1]) + "." +
+                            String(myIp[2]) + "." +
+                            String(myIp[3]);
+                            
+  IPAddress gwIp = WiFi.gatewayIP();
+  const String gwIpString = String(gwIp[0]) + "." +
+                            String(gwIp[1]) + "." +
+                            String(gwIp[2]) + "." +
+                            String(gwIp[3]);
+
   Serial.println();
-  eventLog.log(String("Ansluten till WiFi " + String(ssid) + " (kanal: " + WiFi.channel() + ")"), EventLogger::LogLevel::INFO);
+  eventLog.log("Ansluten till WiFi " + String(ssid), EventLogger::LogLevel::INFO);
+  Serial.flush();
+  Serial.println("\t\t\t\t\tKanal    \t" + WiFi.channel());
+  Serial.println("\t\t\t\t\tIP-adress\t" + myIpString);
+  Serial.println("\t\t\t\t\tGateway  \t" + gwIpString);
+
+  Point netStat("Network");
+  netStat.addField("Channel", WiFi.channel());
+  netStat.addField("Hostname", WiFi.getHostname());
+  netStat.addField("IP address", myIpString);
+  netStat.addField("Gateway", gwIpString);
+  influxClient.writePoint(netStat);
+
 }
 
 Point greenhouseToInflux(GreenhouseSensorData data)
@@ -386,7 +401,6 @@ void controlLight()
 
   const int panelVoltage = it->second;
 
-  time_t now;
   time(&now);
   struct tm *timeinfo = localtime(&now);
 

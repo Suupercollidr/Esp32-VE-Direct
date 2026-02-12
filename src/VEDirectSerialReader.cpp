@@ -139,10 +139,7 @@ bool VEDirectSerialReader::update()
 {
 
     if (!serial.available())
-    {
-        Serial.print("░");
         return false;
-    }
 
     size_t start, end, length;
 
