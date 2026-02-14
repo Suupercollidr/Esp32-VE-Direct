@@ -252,6 +252,8 @@ void initWiFi() // Connect to WiFi
   netStat.addField("IP address", myIpString);
   netStat.addField("Gateway", gwIpString);
   netStat.addField("MAC address", WiFi.macAddress());
+  netStat.addField("Transmitter MAC", transmitterMAC);
+
   influxClient.writePoint(netStat);
 }
 

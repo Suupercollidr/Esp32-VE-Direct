@@ -1,13 +1,14 @@
 #pragma once
 #include <HTTPClient.h>
 
-#define debugModeEnabled false
-
 const char dataFileName[] = "/datalog2.csv";
 const char logFileName[] = "/system.log";
 
 const char *ssid = "SSID";
 const char *password ="Passphrase";
+
+const char *otaUsername = "ota_username";
+const char *otaPassword = "ota_password";
 
 const char *NTP_SERVER1 = "ntp1.sp.se";
 const char *NTP_SERVER2 = "ntp2.sp.se";
