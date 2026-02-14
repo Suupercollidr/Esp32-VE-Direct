@@ -65,13 +65,13 @@ public:
         temperature = average / nominalResistance;
         temperature = log(temperature);
         temperature /= beta;
-        temperature += 1.0 / (nominalResistance + 273.15);
+        temperature += 1.0 / (nominalTemperature + 273.15);
         temperature = 1.0 / temperature;
         temperature -= 273.15;            // convert from K to C
         temperature -= measuredOffset;    // adjust for known offset (at 23°C)
         int roundedTemperature = round(temperature); // Round to int (sensor not that exact anyway)
 
-        if (roundedTemperature > -200)  // Return only reasonable temperatures
+        if (roundedTemperature > -200 && roundedTemperature < 200)  // Return only reasonable temperatures
         {
             return roundedTemperature;
         }

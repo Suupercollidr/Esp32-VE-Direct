@@ -20,8 +20,8 @@
 #include "VEDirectSerialReader.h"
 #include "VEDirectParseMessage.h"
 #include "VEDirectDecoder.h"
-// #include "configuration.h"
-#include "dev_configuration.h"
+#include "configuration.h"
+// #include "dev_configuration.h"
 
 WebServer localWebServer(80);
 
@@ -100,12 +100,14 @@ void setup()
 
   pinMode(RELAY1, OUTPUT);
   pinMode(RELAY2, OUTPUT);
-  // pinMode(RELAY3, OUTPUT);
-  // pinMode(RELAY4, OUTPUT);
+  pinMode(RELAY3, OUTPUT);
+  pinMode(RELAY4, OUTPUT);
 
   // Make sure relay positions match the corresponding power switch
   digitalWrite(RELAY1, (inverterPowerState == ON) ? LOW : HIGH); // NC
   digitalWrite(RELAY2, (xmasLightState == ON) ? HIGH : LOW);     // NO
+  digitalWrite(RELAY3, LOW);
+  digitalWrite(RELAY4, LOW);
 
   greenhouseData.begin();
 
@@ -114,7 +116,9 @@ void setup()
   timeSync(TIME_ZONE, NTP_SERVER1, NTP_SERVER2, NTP_SERVER3);
 
   // OTA
-  localWebServer.on("/", []() { localWebServer.send(200, "text/plain", "Tere tulemast Eesti saatkonda!"); });
+  localWebServer.on("/", []()
+                    { localWebServer.send(200, "text/plain", "Tere tulemast Eesti saatkonda!"); });
+  ElegantOTA.setAuth(otaUsername, otaPassword);
   ElegantOTA.begin(&localWebServer);
   localWebServer.begin();
   eventLog.log("Webbserver startad", EventLogger::LogLevel::INFO);
@@ -228,7 +232,7 @@ void initWiFi() // Connect to WiFi
                             String(myIp[1]) + "." +
                             String(myIp[2]) + "." +
                             String(myIp[3]);
-                            
+
   IPAddress gwIp = WiFi.gatewayIP();
   const String gwIpString = String(gwIp[0]) + "." +
                             String(gwIp[1]) + "." +
@@ -247,8 +251,8 @@ void initWiFi() // Connect to WiFi
   netStat.addField("Hostname", WiFi.getHostname());
   netStat.addField("IP address", myIpString);
   netStat.addField("Gateway", gwIpString);
+  netStat.addField("MAC address", WiFi.macAddress());
   influxClient.writePoint(netStat);
-
 }
 
 Point greenhouseToInflux(GreenhouseSensorData data)
