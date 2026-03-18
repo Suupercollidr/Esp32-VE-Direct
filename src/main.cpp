@@ -330,7 +330,7 @@ Point veToInflux(String pointName, VEDirectParseMessage parsedMessage, std::map<
   {
     if (conversionFactors.count(key))
     {
-      float floatVal = val / conversionFactors.at(key);
+      float floatVal = static_cast<float>(val) / conversionFactors.at(key);
       newPoint.addField(key, floatVal);
       continue;
     }
