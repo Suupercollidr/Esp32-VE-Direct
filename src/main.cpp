@@ -128,7 +128,7 @@ void setup()
 
   dhtSensorRoom.setup(DHT_PIN, DHTesp::DHT11);
 
-  float setupTime = millis() / 1000;
+  float setupTime = millis() / 1000.0f;
 
   eventLog.log(String("Systemet startat. Uppstarten tog " + String(setupTime) + " s."), EventLogger::LogLevel::INFO);
   eventLog.log(String("Senaste återställning: " + String(getResetReason(resetReason)) + " (" + String(resetReason) + ")"), EventLogger::LogLevel::INFO);
