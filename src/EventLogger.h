@@ -36,6 +36,15 @@ private:
     int lastSdDetectState = -1;
     bool sdAvailable = false;
     const char *logFileName;
+    struct LogEntry
+    {
+        unsigned long lastTime; // Tidpunkt för senaste loggningen
+        int count;              // Antal upprepningar
+    };
+    std::unordered_map<uint32_t, LogEntry> logHistory; // Map för att lagra logghistorik
+    const std::vector<int> suppressionThresholds = {10, 100, 1000};
+    const unsigned long suppressionPeriod = 86400000; // 1d i millisekunder
+
     InfluxDBClient &influxClient;
 
     bool checkSDStatus();
@@ -49,4 +58,8 @@ private:
                        LogLevel level);
 
     const char *levelToString(LogLevel level);
+
+    uint16_t shouldReport(const String &message); 
+
+    uint32_t simpleHash(const String &message); // Hash-funktion
 };

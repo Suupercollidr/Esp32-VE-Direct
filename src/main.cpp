@@ -316,7 +316,8 @@ Point houseStatsToInflux()
 
 Point veToInflux(String pointName, VEDirectParseMessage parsedMessage, std::map<String, int> conversionFactors, std::map<String, String> displayNames, CodeMap codes)
 {
-  storeDataToNvs("lastState", "veToInflux");
+  String action = "veToInflux: " + pointName;
+  storeDataToNvs("lastState", action.c_str());
 
   Point newPoint(pointName);
   const auto &intData = parsedMessage.getIntMap();

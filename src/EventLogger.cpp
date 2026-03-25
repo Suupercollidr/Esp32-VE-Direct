@@ -14,20 +14,29 @@ EventLogger::EventLogger(InfluxDBClient &client,
     if (sdDetectPin >= 0)
         pinMode(sdDetectPin, INPUT_PULLUP);
 
-//    sdAvailable = SD.begin();
-    sdAvailable = false;    // Turn off b/c broken
+    //    sdAvailable = SD.begin();
+    sdAvailable = false; // Turn off b/c broken
     if (!sdAvailable)
         Serial.println("Inget SD-kort");
 }
 
-void EventLogger::log(const String &message, LogLevel level)
+void EventLogger::log(const String &originalMessage, LogLevel level)
 {
-    time_t now;
-    time(&now);
+
+    time_t nowTime;
+    time(&nowTime);
+
+    auto logCount = shouldReport(originalMessage);
+    if (logCount == 0)
+        return;
+
+    String message = originalMessage;
+    if (logCount > 1)
+        message = "Inträffat " + String(logCount) + " gånger: " + message;
 
     char timestamp[30];
     strftime(timestamp, sizeof(timestamp),
-             "%Y-%m-%d\t%H:%M:%S", localtime(&now));
+             "%Y-%m-%d\t%H:%M:%S", localtime(&nowTime));
 
     static const char *levelStr = levelToString(level);
 
@@ -124,4 +133,47 @@ bool EventLogger::checkSDStatus()
         Serial.println("SD-kort borttaget");
 
     return sdAvailable;
+}
+
+uint16_t EventLogger::shouldReport(const String &message)
+{
+    uint32_t hash = simpleHash(message); // Skapa en hash av meddelandet
+    uint32_t now = millis();
+
+    auto it = logHistory.find(hash); // Hitta hashen i logHistory
+
+    if (it == logHistory.end()) // Hittade inte hashen, första gången meddelandet kommer
+    {
+        logHistory[hash] = {now, 0}; // Lägg till i logHistory
+        return 1;
+    }
+
+    it->second.count++;
+    uint16_t count = it->second.count;
+
+    if (now - it->second.lastTime > suppressionPeriod) // Om suppressionPeriod passerats
+    {
+        it->second.lastTime = now;
+        return count;
+    }
+
+    for (int threshold : suppressionThresholds) // Kolla om vi nått något av våra definerade tröskelvärden
+    {
+        if (count == threshold || count % 1000 == 0)
+        {
+            it->second.lastTime = now;
+            return count;
+        }
+    }
+    return 0;
+}
+
+uint32_t EventLogger::simpleHash(const String &str)
+{
+    uint32_t hash = 5381;
+    for (size_t i = 0; i < str.length(); i++)
+    {
+        hash = ((hash << 5) + hash) + str[i]; // hash * 33 + c
+    }
+    return hash;
 }
