@@ -3,11 +3,11 @@
  * @brief Calculates the temperature for a NTC sensor
  * @param powerPin GPIO pin that provides power to the NTC sensor
  * @param readPin GPIO pin where we read the resistance of the NTC sensor
- * 
- * 
+ *
+ *
  * @version 0.1
  * @date 2025-11-25
- * 
+ *
  */
 
 #pragma once
@@ -67,18 +67,14 @@ public:
         temperature /= beta;
         temperature += 1.0 / (nominalTemperature + 273.15);
         temperature = 1.0 / temperature;
-        temperature -= 273.15;            // convert from K to C
-        temperature -= measuredOffset;    // adjust for known offset (at 23°C)
+        temperature -= 273.15;                       // convert from K to C
+        temperature -= measuredOffset;               // adjust for known offset (at 23°C)
         int roundedTemperature = round(temperature); // Round to int (sensor not that exact anyway)
 
-        if (roundedTemperature > -200 && roundedTemperature < 200)  // Return only reasonable temperatures
-        {
+        if (roundedTemperature > -200 && roundedTemperature < 200) // Return only reasonable temperatures
             return roundedTemperature;
-        }
-        else
-        {
-            eventLog.log("Orealistisk temperatur från NTC på pin " + String(readPin) + " (" + String(roundedTemperature) + "°C)", EventLogger::LogLevel::WARNING);
-            return std::nullopt;
-        }
+
+        eventLog.log("Orealistisk temperatur från NTC på pin " + String(readPin) + " (" + String(roundedTemperature) + "°C)", EventLogger::LogLevel::WARNING);
+        return std::nullopt;
     }
 };

@@ -24,9 +24,9 @@ void VEDirectSerialReader::copySerialBufferToRingBuffer()
 
         if (RingBufferWritePos >= BUFFER_SIZE)
             RingBufferWritePos = 0;
-        
+
         if (!serial.available())
-            delay(1);  // Give device a chance to finish 
+            delay(1); // Give device a chance to finish
     }
 }
 
@@ -61,11 +61,12 @@ int VEDirectSerialReader::searchChecksumBackwards(const char *buffer, int head, 
 
 char *VEDirectSerialReader::messageToLinearBuffer(const char *ringBuffer, size_t start, size_t end)
 {
-    if (start >= BUFFER_SIZE || end >= BUFFER_SIZE) // Hantera fel, t.ex. returnera nullptr eller kasta ett undantag
+    if (start >= BUFFER_SIZE || end >= BUFFER_SIZE)
     {
         eventLog.log("Start- eller slutposition utanför bufferten", EventLogger::LogLevel::WARNING);
         return nullptr;
     }
+
     // Beräkna längden på meddelandet
     size_t messageLength;
     if (end > start)
@@ -73,41 +74,19 @@ char *VEDirectSerialReader::messageToLinearBuffer(const char *ringBuffer, size_t
     else
         messageLength = (BUFFER_SIZE - start) + end; // Meddelandet sträcker sig över buffertens slut
 
-    // Serial.println("Meddelandet är " + String(messageLength) + " tecken långt");
-
     // Allokera en ny buffer för meddelandet (+1 för \0 om du vill)
     char *messageBuffer = new char[messageLength + 1];
 
     // Kopiera meddelandet till den nya bufferten
-    if (end > start)
-    {
-        // Meddelandet är linjärt i bufferten
+    if (end > start) // Meddelandet är linjärt i bufferten
         memcpy(messageBuffer, &ringBuffer[start], messageLength);
-    }
-    else
+
+    else // Meddelandet sträcker sig över buffertens slut
     {
-        // Meddelandet sträcker sig över buffertens slut
         size_t firstPartLength = BUFFER_SIZE - start;
         memcpy(messageBuffer, &ringBuffer[start], firstPartLength);
         memcpy(messageBuffer + firstPartLength, ringBuffer, end);
     }
-
-    //    messageBuffer[messageLength] = '\0';
-
-    Serial.println();
-    for (int i = 0; i < messageLength; i++)
-    {
-        char j = messageBuffer[i];
-        // Serial.print(j);
-    }
-    /*
-    Serial.println();
-    Serial.print("Första tecknet är: ");
-    Serial.println(static_cast<int>(messageBuffer[0]));
-    Serial.print("Sista tecknet är: ");
-    Serial.println(static_cast<int>(messageBuffer[messageLength - 1]));
-    Serial.flush();
-    */
 
     return messageBuffer;
 }
@@ -118,19 +97,12 @@ bool VEDirectSerialReader::verifyChecksum(const char *message, size_t length)
         return false;
 
     uint8_t sum = 0;
-    // Serial.println("Meddelandet är " + String(length) + " tecken långt.");
 
     for (size_t i = 0; i < length; i++)
     {
-        uint8_t thisByte = static_cast<uint8_t>(message[i]); // säker på binär data
-        sum += thisByte;                                     // summera korrekt
-        // Serial.println(String(sum));
-        // Serial.printf("%d, ", thisByte);                     // skriv ut som tal
+        uint8_t thisByte = static_cast<uint8_t>(message[i]);
+        sum += thisByte;
     }
-
-    // Serial.println();
-    // Serial.println("Summa inkl. checksum (ska vara 0): " + String(sum));
-    // Serial.println(static_cast<uint8_t>(message[length - 1]));
 
     return (sum == 0);
 }
@@ -158,17 +130,12 @@ bool VEDirectSerialReader::update()
     int startPos = searchChecksumBackwards(ringBuffer, searchStartPos, endOfMessage);
 
     if (startPos < 0 || startPos == endPos) // If only find one endOfMessage, assume there is exactly 1 message at the start of the buffer
-    {
-        Serial.println("Hittar inget gammalt meddelande, börjar på 0");
-        Serial.flush();
         start = 0;
-    }
     else
-    {
         start = (startPos + strlen(endOfMessage) + 1) % BUFFER_SIZE;
-    }
 
     char *message = messageToLinearBuffer(ringBuffer, start, end);
+
     if (message == nullptr)
         return false;
 
@@ -176,9 +143,21 @@ bool VEDirectSerialReader::update()
                  ? (end - start)
                  : (BUFFER_SIZE - start + end);
 
+    // Filtrera bort HEX-rader
+    size_t filteredLength = filterHexLines(message, length);
+    if (filteredLength == 0)     // Inget kvar efter filtrering
+    {
+        delete[] message;
+        return false;
+    }
+
+    // Uppdatera längden
+    length = filteredLength;
+
     if (!verifyChecksum(message, length))
     {
         eventLog.log("Felaktig kontrollsumma för:\n" + String(message), EventLogger::LogLevel::WARNING);
+        delete[] message;
         return false;
     }
 
@@ -189,6 +168,26 @@ bool VEDirectSerialReader::update()
     lastMessageLength = length;
 
     return true;
+}
+
+size_t VEDirectSerialReader::filterHexLines(char *buffer, size_t length)
+{
+    size_t writePos = 0;
+    bool inHexLine = false;
+
+    for (size_t readPos = 0; readPos < length; readPos++)
+    {
+        if (buffer[readPos] == ':')
+            inHexLine = true; // Början på en HEX-rad
+
+        if (!inHexLine)
+            buffer[writePos++] = buffer[readPos]; // Kopiera tecknet om vi inte är i en HEX-rad
+
+        if (inHexLine && (buffer[readPos] == '\n' || buffer[readPos] == '\r'))
+            inHexLine = false; // Slut på HEX-rad
+    }
+
+    return writePos; // Returnera den nya längden på den filtrerade bufferten
 }
 
 String VEDirectSerialReader::getMessage() const

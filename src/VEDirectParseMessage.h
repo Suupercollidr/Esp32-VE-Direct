@@ -81,13 +81,9 @@ void VEDirectParseMessage::parseMessage(const String &message)
 void VEDirectParseMessage::storeField(const String &label, const String &value)
 {
     if (isInt(value))
-    {
         numData[label] = value.toInt();
-    }
     else
-    {
         txtData[label] = value;
-    }
 }
 
 bool VEDirectParseMessage::isInt(String value)

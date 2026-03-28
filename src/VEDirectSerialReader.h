@@ -34,6 +34,8 @@ private:
     int searchChecksumBackwards(const char *buffer, int head, const char *word);
 
     char *messageToLinearBuffer(const char *ringBuffer, size_t start, size_t end);
+    
+    size_t filterHexLines(char *buffer, size_t length);
 
     bool verifyChecksum(const char *message, size_t length);
 
