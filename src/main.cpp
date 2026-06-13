@@ -43,10 +43,13 @@ VEDirectParseMessage mpptData;
 ESPNowReceiver greenhouseData;
 
 uint32_t lastUpdate = millis();
+uint32_t lastButtonPush = millis();
 uint32_t lastInverterPowerChange = millis();
+uint32_t lastCameraPowerChange = millis();
 
 tm timeinfo;
 time_t now;
+uint32_t lastNtpSync = millis();
 
 enum powerSwitch
 {
@@ -56,6 +59,7 @@ enum powerSwitch
 
 powerSwitch inverterPowerState = ON;
 powerSwitch xmasLightState = OFF;
+powerSwitch cameraState = ON;
 
 /*
 According to VE.Direct documentation, these are the maximum sizes:
@@ -81,8 +85,10 @@ Point greenhouseToInflux(GreenhouseSensorData data);
 Point sysStatsToInflux();
 Point houseStatsToInflux();
 Point veToInflux(String pointName, VEDirectParseMessage parsedMessage, std::map<String, int> conversionFactors, std::map<String, String> displayNames, CodeMap codes);
-void controlInverterByVoltage();
+void controlInverter();
 void controlLight();
+void controlCamera();
+void IRAM_ATTR camButtonPush();
 
 void setup()
 {
@@ -98,16 +104,21 @@ void setup()
   Serial.println(" System is starting ");
   Serial.println("====================");
 
-  pinMode(RELAY1, OUTPUT);
-  pinMode(RELAY2, OUTPUT);
-  pinMode(RELAY3, OUTPUT);
-  pinMode(RELAY4, OUTPUT);
+  pinMode(RELAY_INV, OUTPUT);
+  pinMode(RELAY_LIGHT, OUTPUT);
+  pinMode(RELAY_CAM, OUTPUT);
+  pinMode(RELAY_AUX, OUTPUT);
+  pinMode(BUTTON_LED, OUTPUT);
+  pinMode(CAM_SWITCH, INPUT);
+
+  attachInterrupt(CAM_SWITCH, camButtonPush, FALLING);
 
   // Make sure relay positions match the corresponding power switch
-  digitalWrite(RELAY1, (inverterPowerState == ON) ? LOW : HIGH); // NC
-  digitalWrite(RELAY2, (xmasLightState == ON) ? HIGH : LOW);     // NO
-  digitalWrite(RELAY3, LOW);
-  digitalWrite(RELAY4, LOW);
+  digitalWrite(RELAY_INV, (inverterPowerState == ON) ? LOW : HIGH); // NC
+  digitalWrite(RELAY_LIGHT, (xmasLightState == ON) ? HIGH : LOW);   // NO
+  digitalWrite(RELAY_CAM, (cameraState == ON) ? HIGH : LOW);        // NC
+  digitalWrite(RELAY_AUX, LOW);
+  digitalWrite(BUTTON_LED, LOW);
 
   greenhouseData.begin();
 
@@ -165,8 +176,9 @@ void loop()
     Serial.println("\nSamlar ihop och skickar data till Influx");
     storeDataToNvs("lastState", "Send data triggered");
 
-    controlInverterByVoltage(); // Turn off fridge if power is low
+    controlInverter(); // Turn off fridge if power is low
     controlLight();
+    controlCamera();
 
     inverterData.stringToMap(victronInverter.getMessage());
     mpptData.stringToMap(victronMppt.getMessage());
@@ -209,6 +221,12 @@ void loop()
       eventLog.log(influxClient.getLastErrorMessage(), EventLogger::LogLevel::ERROR);
       continue;
     }
+  }
+
+  if (millis() - lastNtpSync > (NTP_SYNC_INTERVAL * 3600000))
+  {
+    timeSync(TIME_ZONE, NTP_SERVER1, NTP_SERVER2, NTP_SERVER3);
+    lastNtpSync = millis();
   }
 
   yield();
@@ -344,7 +362,7 @@ Point veToInflux(String pointName, VEDirectParseMessage parsedMessage, std::map<
   return newPoint;
 }
 
-void controlInverterByVoltage()
+void controlInverter()
 {
   const auto &intData = mpptData.getIntMap(); // Battery voltage in mV. Using MPPT voltage, since Inv. voltage = 0 when off
 
@@ -371,7 +389,7 @@ void controlInverterByVoltage()
   // If battery voltage is lower than off voltage, turn inverter off
   if (inverterPowerState == ON && voltage < INV_OFF_VOLTAGE)
   {
-    digitalWrite(RELAY1, HIGH); // Relay is NC, so triggering it will turn off the inverter
+    digitalWrite(RELAY_INV, HIGH); // Relay is NC, so triggering it will turn off the inverter
     lastInverterPowerChange = millis();
     inverterPowerState = OFF;
     eventLog.log("Inverter stängdes av, låg batterispänning", EventLogger::LogLevel::INFO);
@@ -381,7 +399,7 @@ void controlInverterByVoltage()
   // If battery voltage is higher than on voltage, turn inverter on
   if (inverterPowerState == OFF && voltage > INV_ON_VOLTAGE)
   {
-    digitalWrite(RELAY1, LOW); // Relay is NC, so releasing it will turn on the inverter
+    digitalWrite(RELAY_INV, LOW); // Relay is NC, so releasing it will turn on the inverter
     lastInverterPowerChange = millis();
     inverterPowerState = ON;
     eventLog.log("Inverter slogs på, tillräcklig batterispänning ", EventLogger::LogLevel::INFO);
@@ -417,17 +435,54 @@ void controlLight()
 
   xmasLightState = (isXmas && isDark && isDay) ? ON : OFF;
 
-  switch (xmasLightState)
+  xmasLightState ? digitalWrite(RELAY_LIGHT, HIGH) : digitalWrite(RELAY_LIGHT, LOW);
+}
+
+void controlCamera()
+{
+  if (millis() - lastCameraPowerChange < (CAM_RESTART_PERIOD * 1000))
+    return;
+
+  lastCameraPowerChange = millis();
+
+  switch (cameraState)
   {
   case ON:
-    digitalWrite(RELAY2, HIGH); // Relay is NO
+    digitalWrite(BUTTON_LED, LOW); // Green light off when cam on
+    digitalWrite(RELAY_CAM, LOW);  // Relay is NC
     break;
 
   case OFF:
-    digitalWrite(RELAY2, LOW); // Relay is NO
+    digitalWrite(BUTTON_LED, HIGH); // Green light indicates cam is OFF
+    digitalWrite(RELAY_CAM, HIGH);  // Relay is NC
     break;
 
   default:
+    break;
+  }
+}
+
+void IRAM_ATTR camButtonPush()
+{
+  if (millis() < lastButtonPush + BUTTON_DEBOUNCE_TIME)
+    return;
+
+  lastButtonPush = millis();
+
+  switch (cameraState)
+  {
+  case ON:
+    cameraState == OFF;
+    eventLog.log("Kamera avstängd via knapp", EventLogger::LogLevel::INFO); 
+    break;
+
+  case OFF:
+    cameraState == ON;
+    eventLog.log("Kamera påslagen via knapp", EventLogger::LogLevel::INFO); 
+    break;
+  
+  default:
+    cameraState = ON;
     break;
   }
 }

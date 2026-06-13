@@ -14,6 +14,7 @@ const char *NTP_SERVER1 = "ntp1.sp.se";
 const char *NTP_SERVER2 = "ntp2.sp.se";
 const char *NTP_SERVER3 = "pool.ntp.org";
 const char *TIME_ZONE = "CET-1CEST-2,M3.5.0/02:00:00,M10.5.0/03:00:00";
+const int NTP_SYNC_INTERVAL = 6;   // hours
 
 // IPAddress for DNS servers
 IPAddress primaryDNS(8, 8, 8, 8);   // Google primary DNS
@@ -44,8 +45,8 @@ const int INV_RETRY_PERIOD = 1800; // seconds
 #define NTC1_READ_PIN A7 // Pin, to which the voltage divider is connected
 #define NTC2_READ_PIN A6 // Pin, to which the voltage divider is connected
 #define NTC_POWER_PIN 32 // 3.3V for the voltage divider
-#define RELAY1 5
-#define RELAY2 23
-#define RELAY3 19
-#define RELAY4 18
+#define RELAY_INV 5
+#define RELAY_LIGHT 23
+#define RELAY_CAM 19
+#define RELAY_AUX 18
 
