@@ -6,7 +6,7 @@
 src/configuration.h
 src/dev_configuration.h
 temp/*
-
+esphome/secrets.yaml
 
 # PlatformIO
 .pioenvs/
