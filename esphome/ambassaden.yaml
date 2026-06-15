@@ -1,0 +1,354 @@
+esphome:
+  name: ambassaden
+  platform: ESP32
+  board: esp32dev  # Anpassa om du använder en specifik ESP32-modell 🐱
+
+# --- WiFi ---
+wifi:
+  ssid: !secret wifi_ssid 🐱
+  password: !secret wifi_password 🐱
+  manual_ip:
+    static_ip: 192.168.1.🐱  # Ersätt med din önskade IP
+    gateway: 192.168.1.🐱   # Ersätt med din gateway
+    subnet: 255.255.255.0
+
+# --- OTA ---
+ota:
+  password: !secret ota_password 🐱
+
+# --- Tidssynkronisering ---
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: Europe/Stockholm
+    servers:
+      - pool.ntp.org
+
+# --- Logger ---
+logger:
+  level: DEBUG
+  baud_rate: 0
+
+# --- Seriell port för debug ---
+serial:
+  baud_rate: 115200
+
+# --- Sensorer ---
+sensor:
+  # DHT11 (temperatur och fuktighet)
+  - platform: dht
+    pin: 🐱  # Ersätt med din DHT_PIN (t.ex. GPIO4)
+    temperature:
+      name: "Rumstemperatur"
+      id: room_temp
+    humidity:
+      name: "Luftfuktighet"
+      id: room_humidity
+    update_interval: 60s
+
+  # NTC-sensorer (kyl och frys)
+  - platform: adc
+    pin: 🐱  # Ersätt med NTC1_READ_PIN (t.ex. GPIO34)
+    name: "NTC1 Raw Value"
+    id: ntc1_raw
+    update_interval: 10s
+    on_value:
+      then:
+        - lambda: |-
+            const float R0 = 10000.0;
+            const float B = 3950.0;
+            const float T0 = 298.15;
+            float adc_value = id(ntc1_raw).state;
+            float voltage = adc_value * (3.3 / 4095.0);
+            float resistance = (3.3 - voltage) * 10000.0 / voltage;
+            float temperature = 1.0 / (1.0/T0 + (1.0/B) * log(resistance / R0)) - 273.15;
+            id(ntc1_temp).publish_state(temperature);
+
+  - platform: template
+    name: "Temp_kyl"
+    id: ntc1_temp
+    unit_of_measurement: "°C"
+
+  - platform: adc
+    pin: 🐱  # Ersätt med NTC2_READ_PIN (t.ex. GPIO35)
+    name: "NTC2 Raw Value"
+    id: ntc2_raw
+    update_interval: 10s
+    on_value:
+      then:
+        - lambda: |-
+            const float R0 = 10000.0;
+            const float B = 3950.0;
+            const float T0 = 298.15;
+            float adc_value = id(ntc2_raw).state;
+            float voltage = adc_value * (3.3 / 4095.0);
+            float resistance = (3.3 - voltage) * 10000.0 / voltage;
+            float temperature = 1.0 / (1.0/T0 + (1.0/B) * log(resistance / R0)) - 273.15;
+            id(ntc2_temp).publish_state(temperature);
+
+  - platform: template
+    name: "Temp_frys"
+    id: ntc2_temp
+    unit_of_measurement: "°C"
+
+  # Victron VE.Direct (batterispänning och panelspänning)
+  - platform: template
+    name: "Batterispänning"
+    id: battery_voltage
+    unit_of_measurement: "V"
+
+  - platform: template
+    name: "Panelspänning"
+    id: panel_voltage
+    unit_of_measurement: "V"
+
+  # Växthusdata (mottagen via ESP-NOW)
+  - platform: template
+    name: "Växthus Inomhustemperatur"
+    id: greenhouse_indoor_temp
+    unit_of_measurement: "°C"
+
+  - platform: template
+    name: "Växthus Utomhustemperatur"
+    id: greenhouse_outdoor_temp
+    unit_of_measurement: "°C"
+
+  - platform: template
+    name: "Växthus Jordtemperatur 1"
+    id: greenhouse_soil_temp1
+    unit_of_measurement: "°C"
+
+  - platform: template
+    name: "Växthus Jordtemperatur 2"
+    id: greenhouse_soil_temp2
+    unit_of_measurement: "°C"
+
+  - platform: template
+    name: "Växthus Jordfuktighet 1"
+    id: greenhouse_soil_moisture1
+    unit_of_measurement: "%"
+
+  - platform: template
+    name: "Växthus Jordfuktighet 2"
+    id: greenhouse_soil_moisture2
+    unit_of_measurement: "%"
+
+  - platform: template
+    name: "Växthus Batterispänning"
+    id: greenhouse_battery_voltage
+    unit_of_measurement: "V"
+
+# --- Reläer ---
+switch:
+  - platform: gpio
+    name: "Inverter Relä"
+    pin: 🐱  # Ersätt med RELAY_INV (t.ex. GPIO12)
+    id: inverter_relay
+    inverted: true  # NC-relä
+
+  - platform: gpio
+    name: "Julbelysning Relä"
+    pin: 🐱  # Ersätt med RELAY_LIGHT (t.ex. GPIO13)
+    id: xmas_light
+
+  - platform: gpio
+    name: "Kamera Relä"
+    pin: 🐱  # Ersätt med RELAY_CAM (t.ex. GPIO14)
+    id: camera_relay
+    inverted: true  # NC-relä
+
+  - platform: gpio
+    name: "Aux Relä"
+    pin: 🐱  # Ersätt med RELAY_AUX (t.ex. GPIO15)
+    id: aux_relay
+
+# --- ESP-NOW (för växthusdata) ---
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+esp_now:
+  id: esp_now_hub
+
+binary_sensor:
+  - platform: esp_now
+    id: greenhouse_data_received
+    mac_address: "🐱"  # Ersätt med MAC-adressen till växthus-ESP32
+    on_receive:
+      then:
+        - lambda: |-
+            // Hantera mottagen data från växthuset
+            // Exempel: Antag att data är en struct med fält som indoorTemp, outdoorTemp, etc.
+            // Du behöver anpassa detta baserat på din GreenhouseSensorData-struct
+            ESP_LOGD("esp_now", "Data mottagen från växthuset");
+            // Exempel (ersätt med din logik):
+            // id(greenhouse_indoor_temp).publish_state(data.indoorTemp / 10.0);
+
+# --- UART för Victron VE.Direct ---
+uart:
+  - id: uart_inverter
+    tx_pin: 🐱  # Ersätt med TXD1 (t.ex. GPIO16)
+    rx_pin: 🐱  # Ersätt med RXD1 (t.ex. GPIO17)
+    baud_rate: 19200
+    on_data:
+      then:
+        - lambda: |-
+            static std::string buffer;
+            while (id(uart_inverter).available()) {
+              char c = id(uart_inverter).read();
+              if (c == '\n') {
+                if (buffer.find("V:") == 0) {
+                  float voltage = std::stof(buffer.substr(2)) / 1000.0;  // mV -> V
+                  id(battery_voltage).publish_state(voltage);
+                }
+                buffer.clear();
+              } else {
+                buffer += c;
+              }
+            }
+
+  - id: uart_mppt
+    tx_pin: 🐱  # Ersätt med TXD2 (t.ex. GPIO18)
+    rx_pin: 🐱  # Ersätt med RXD2 (t.ex. GPIO19)
+    baud_rate: 19200
+    on_data:
+      then:
+        - lambda: |-
+            static std::string buffer;
+            while (id(uart_mppt).available()) {
+              char c = id(uart_mppt).read();
+              if (c == '\n') {
+                if (buffer.find("VPV:") == 0) {
+                  float panel_voltage = std::stof(buffer.substr(4)) / 1000.0;  // mV -> V
+                  id(panel_voltage).publish_state(panel_voltage);
+                }
+                buffer.clear();
+              } else {
+                buffer += c;
+              }
+            }
+
+# --- Globala variabler (för tillstånd) ---
+globals:
+  - id: inverter_state
+    type: bool
+    initial_value: "true"  # ON vid start
+    restore_value: yes
+
+  - id: xmas_light_state
+    type: bool
+    initial_value: "false"  # OFF vid start
+    restore_value: yes
+
+  - id: camera_state
+    type: bool
+    initial_value: "true"  # ON vid start
+    restore_value: yes
+
+# --- Automatisering ---
+automation:
+  # Styr inverter baserat på batterispänning
+  - alias: "Stäng av inverter vid låg spänning"
+    trigger:
+      - platform: sensor
+        id: battery_voltage
+        below: 🐱  # Ersätt med INV_OFF_VOLTAGE (t.ex. 11.0)
+    condition:
+      - lambda: |-
+          return id(inverter_state);
+    then:
+      - switch.turn_off: inverter_relay
+      - globals.set:
+          id: inverter_state
+          value: "false"
+      - logger.log: "Inverter avstängd - låg batterispänning"
+
+  - alias: "Sätt på inverter vid tillräcklig spänning"
+    trigger:
+      - platform: sensor
+        id: battery_voltage
+        above: 🐱  # Ersätt med INV_ON_VOLTAGE (t.ex. 12.5)
+    condition:
+      - lambda: |-
+          return !id(inverter_state);
+    then:
+      - switch.turn_on: inverter_relay
+      - globals.set:
+          id: inverter_state
+          value: "true"
+      - logger.log: "Inverter påslagen - tillräcklig batterispänning"
+
+  # Styr julbelysning
+  - alias: "Styr julbelysning"
+    trigger:
+      - platform: time
+        at: "08:00:00"
+      - platform: time
+        at: "20:00:00"
+      - platform: sensor
+        id: panel_voltage
+    condition:
+      - lambda: |-
+          auto now = id(sntp_time).now();
+          bool is_xmas = (now.month == 11 && now.day >= 1) || (now.month == 0 && now.day <= 13);
+          bool is_dark = id(panel_voltage).state < 🐱;  # Ersätt med 5.0 (5V)
+          bool is_day = (now.hour >= 8) && (now.hour < 20);
+          return is_xmas && is_dark && is_day;
+    then:
+      - switch.turn_on: xmas_light
+      - globals.set:
+          id: xmas_light_state
+          value: "true"
+
+  - alias: "Stäng av julbelysning"
+    trigger:
+      - platform: time
+        at: "20:00:00"
+      - platform: sensor
+        id: panel_voltage
+    condition:
+      - lambda: |-
+          auto now = id(sntp_time).now();
+          bool is_xmas = (now.month == 11 && now.day >= 1) || (now.month == 0 && now.day <= 13);
+          bool is_light = id(panel_voltage).state >= 🐱;  # Ersätt med 5.0 (5V)
+          bool is_night = (now.hour < 8) || (now.hour >= 20);
+          return is_xmas && (is_light || is_night);
+    then:
+      - switch.turn_off: xmas_light
+      - globals.set:
+          id: xmas_light_state
+          value: "false"
+
+  # Styr kamera via knapp (simulerad)
+  - alias: "Växla kamera-tillstånd"
+    trigger:
+      - platform: gpio
+        pin: 🐱  # Ersätt med CAM_SWITCH (t.ex. GPIO5)
+        mode: INPUT_PULLUP
+        on_press:
+          then:
+            - if:
+                condition:
+                  lambda: |-
+                    return id(camera_state);
+                then:
+                  - switch.turn_off: camera_relay
+                  - globals.set:
+                      id: camera_state
+                      value: "false"
+                  - logger.log: "Kamera avstängd via knapp"
+                else:
+                  - switch.turn_on: camera_relay
+                  - globals.set:
+                      id: camera_state
+                      value: "true"
+                  - logger.log: "Kamera påslagen via knapp"
+
+# --- MQTT (för InfluxDB via Telegraf) ---
+mqtt:
+  broker: 🐱  # Ersätt med din MQTT-broker (t.ex. 192.168.1.100)
+  username: !secret mqtt_user 🐱
+  password: !secret mqtt_password 🐱
+  discovery: false
+  topic_prefix: esphome/ambassaden
