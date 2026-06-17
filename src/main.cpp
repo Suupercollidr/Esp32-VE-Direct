@@ -9,6 +9,7 @@
 #include <time.h>
 #include <RTClib.h>
 #include <InfluxDbClient.h>
+#include <mqtt_client.h>
 #include <InfluxDbCloud.h>
 #include <DHTesp.h>
 #include "maputils.h"
@@ -59,6 +60,7 @@ enum powerSwitch
 
 powerSwitch inverterPowerState = ON;
 powerSwitch xmasLightState = OFF;
+powerSwitch cameraTarget = ON;
 powerSwitch cameraState = ON;
 
 /*
@@ -105,18 +107,19 @@ void setup()
   Serial.println("====================");
 
   pinMode(RELAY_INV, OUTPUT);
+
   pinMode(RELAY_LIGHT, OUTPUT);
   pinMode(RELAY_CAM, OUTPUT);
   pinMode(RELAY_AUX, OUTPUT);
   pinMode(BUTTON_LED, OUTPUT);
-  pinMode(CAM_SWITCH, INPUT);
+  pinMode(CAM_SWITCH, INPUT_PULLUP);
 
-  attachInterrupt(CAM_SWITCH, camButtonPush, FALLING);
+  attachInterrupt(digitalPinToInterrupt(CAM_SWITCH), camButtonPush, FALLING);
 
   // Make sure relay positions match the corresponding power switch
-  digitalWrite(RELAY_INV, (inverterPowerState == ON) ? LOW : HIGH); // NC
-  digitalWrite(RELAY_LIGHT, (xmasLightState == ON) ? HIGH : LOW);   // NO
-  digitalWrite(RELAY_CAM, (cameraState == ON) ? HIGH : LOW);        // NC
+  digitalWrite(RELAY_INV, HIGH);                                  // NC
+  digitalWrite(RELAY_LIGHT, (xmasLightState == ON) ? HIGH : LOW); // NO
+  digitalWrite(RELAY_CAM, (cameraState == ON) ? HIGH : LOW);      // NC
   digitalWrite(RELAY_AUX, LOW);
   digitalWrite(BUTTON_LED, LOW);
 
@@ -169,6 +172,7 @@ void loop()
     Serial.println("Tog emot ny data från MPPT");
 
   std::vector<Point> influxPoints;
+  controlCamera();
 
   // Send data at regular intervals
   if (millis() >= lastUpdate + (UPDATE_INTERVAL * 1000))
@@ -176,9 +180,8 @@ void loop()
     Serial.println("\nSamlar ihop och skickar data till Influx");
     storeDataToNvs("lastState", "Send data triggered");
 
-    controlInverter(); // Turn off fridge if power is low
-    controlLight();
-    controlCamera();
+    // controlInverter(); // Turn off fridge if power is low
+    // controlLight();
 
     inverterData.stringToMap(victronInverter.getMessage());
     mpptData.stringToMap(victronMppt.getMessage());
@@ -440,25 +443,37 @@ void controlLight()
 
 void controlCamera()
 {
-  if (millis() - lastCameraPowerChange < (CAM_RESTART_PERIOD * 1000))
+  if (cameraState == cameraTarget)
+    return;
+
+  if (millis() < lastCameraPowerChange + (CAM_RESTART_PERIOD * 1000))
     return;
 
   lastCameraPowerChange = millis();
+  cameraState = cameraTarget;
 
+  Serial.println("Camera state change");
+  Serial.print("Camera target is: ");
+  Serial.println(cameraTarget);
   switch (cameraState)
   {
   case ON:
     digitalWrite(BUTTON_LED, LOW); // Green light off when cam on
     digitalWrite(RELAY_CAM, LOW);  // Relay is NC
+    eventLog.log("Camera turned on", EventLogger::LogLevel::INFO);
     break;
-
-  case OFF:
+    
+    case OFF:
     digitalWrite(BUTTON_LED, HIGH); // Green light indicates cam is OFF
     digitalWrite(RELAY_CAM, HIGH);  // Relay is NC
+    eventLog.log("Camera turned off", EventLogger::LogLevel::INFO);
+    break;
+    
+    default:
+    Serial.print("Camera target was ");
+    Serial.println(cameraTarget);
     break;
 
-  default:
-    break;
   }
 }
 
@@ -466,23 +481,20 @@ void IRAM_ATTR camButtonPush()
 {
   if (millis() < lastButtonPush + BUTTON_DEBOUNCE_TIME)
     return;
-
   lastButtonPush = millis();
 
-  switch (cameraState)
+  switch (cameraTarget)
   {
   case ON:
-    cameraState == OFF;
-    eventLog.log("Kamera avstängd via knapp", EventLogger::LogLevel::INFO); 
+    cameraTarget = OFF;
     break;
 
   case OFF:
-    cameraState == ON;
-    eventLog.log("Kamera påslagen via knapp", EventLogger::LogLevel::INFO); 
+    cameraTarget = ON;
     break;
-  
+
   default:
-    cameraState = ON;
+    cameraTarget = ON;
     break;
   }
 }

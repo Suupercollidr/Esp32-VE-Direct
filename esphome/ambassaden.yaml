@@ -3,18 +3,20 @@ esphome:
   platform: ESP32
   board: esp32dev  # Anpassa om du använder en specifik ESP32-modell 🐱
 
+config: !include configuration.yaml
+
 # --- WiFi ---
 wifi:
   ssid: !secret wifi_ssid 🐱
   password: !secret wifi_password 🐱
   manual_ip:
-    static_ip: 192.168.1.🐱  # Ersätt med din önskade IP
-    gateway: 192.168.1.🐱   # Ersätt med din gateway
+    static_ip: 192.168.1.212 
+    gateway: 192.168.1.1
     subnet: 255.255.255.0
 
 # --- OTA ---
 ota:
-  password: !secret ota_password 🐱
+  password: !secret ota_password
 
 # --- Tidssynkronisering ---
 time:
@@ -22,22 +24,16 @@ time:
     id: sntp_time
     timezone: Europe/Stockholm
     servers:
+      - ntp1.sp.se
+      - ntp2.sp.se
       - pool.ntp.org
 
-# --- Logger ---
-logger:
-  level: DEBUG
-  baud_rate: 0
-
-# --- Seriell port för debug ---
-serial:
-  baud_rate: 115200
 
 # --- Sensorer ---
 sensor:
   # DHT11 (temperatur och fuktighet)
   - platform: dht
-    pin: 🐱  # Ersätt med din DHT_PIN (t.ex. GPIO4)
+    pin: 33
     temperature:
       name: "Rumstemperatur"
       id: room_temp
@@ -48,7 +44,7 @@ sensor:
 
   # NTC-sensorer (kyl och frys)
   - platform: adc
-    pin: 🐱  # Ersätt med NTC1_READ_PIN (t.ex. GPIO34)
+    pin: 35
     name: "NTC1 Raw Value"
     id: ntc1_raw
     update_interval: 10s
@@ -70,7 +66,7 @@ sensor:
     unit_of_measurement: "°C"
 
   - platform: adc
-    pin: 🐱  # Ersätt med NTC2_READ_PIN (t.ex. GPIO35)
+    pin: 34
     name: "NTC2 Raw Value"
     id: ntc2_raw
     update_interval: 10s
@@ -142,24 +138,24 @@ sensor:
 switch:
   - platform: gpio
     name: "Inverter Relä"
-    pin: 🐱  # Ersätt med RELAY_INV (t.ex. GPIO12)
+    pin: 5
     id: inverter_relay
     inverted: true  # NC-relä
 
   - platform: gpio
     name: "Julbelysning Relä"
-    pin: 🐱  # Ersätt med RELAY_LIGHT (t.ex. GPIO13)
+    pin: 19
     id: xmas_light
 
   - platform: gpio
     name: "Kamera Relä"
-    pin: 🐱  # Ersätt med RELAY_CAM (t.ex. GPIO14)
+    pin: 23
     id: camera_relay
     inverted: true  # NC-relä
 
   - platform: gpio
     name: "Aux Relä"
-    pin: 🐱  # Ersätt med RELAY_AUX (t.ex. GPIO15)
+    pin: 18
     id: aux_relay
 
 # --- ESP-NOW (för växthusdata) ---
@@ -324,7 +320,7 @@ automation:
   - alias: "Växla kamera-tillstånd"
     trigger:
       - platform: gpio
-        pin: 🐱  # Ersätt med CAM_SWITCH (t.ex. GPIO5)
+        pin: 14
         mode: INPUT_PULLUP
         on_press:
           then:
