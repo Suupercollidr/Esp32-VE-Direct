@@ -22,8 +22,8 @@
 #include "VEDirectSerialReader.h"
 #include "VEDirectParseMessage.h"
 #include "VEDirectDecoder.h"
-//#include "configuration.h"
- #include "dev_configuration.h"
+#include "configuration.h"
+//#include "dev_configuration.h"
 
 WebServer localWebServer(80);
 
