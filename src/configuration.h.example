@@ -1,5 +1,7 @@
 #pragma once
 #include <HTTPClient.h>
+#include <esp_system.h>
+#include <Arduino.h>
 
 const char dataFileName[] = "/datalog2.csv";
 const char logFileName[] = "/system.log";
@@ -26,6 +28,13 @@ IPAddress secondaryDNS(8, 8, 4, 4); // Google secondary DNS
 #define INFLUXDB_DATA_BUCKET "Bucket" // It's pronounced 'Bucket'
 #define INFLUXDB_LOG_BUCKET "Log bucket"
 
+// MQTT
+const char *MQTT_HOST = "0.0.0.0";
+const char *MQTT_USER = "USER"; 
+const char *MQTT_PASS = "PASS";
+const char *command_topic = "home/security/cameras/command";
+const char *state_topic = "home/security/cameras/state";
+
 // MAC address for transmitting ESP32 (greenhouse)
 uint8_t transmitterMAC[] = {MAC};
 
@@ -34,6 +43,8 @@ const int UPDATE_INTERVAL = 5; // How often to send data, in seconds
 const int INV_OFF_VOLTAGE = 11000; // mV
 const int INV_ON_VOLTAGE = 13000;  // mV
 const int INV_RETRY_PERIOD = 1800; // seconds
+const int CAM_RESTART_PERIOD = 1; // seconds
+
 
 // Define pins
 #define SD_DET 16

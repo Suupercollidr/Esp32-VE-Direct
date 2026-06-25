@@ -6,13 +6,14 @@
 #include <HTTPClient.h>
 #include <WebServer.h>
 #include <ElegantOTA.h>
+#include <AsyncMqttClient.h>
 #include <time.h>
 #include <RTClib.h>
 #include <InfluxDbClient.h>
-#include <mqtt_client.h>
 #include <InfluxDbCloud.h>
 #include <DHTesp.h>
 #include "maputils.h"
+#include "debounce.h"
 #include "ReadEspNow.h"
 #include "nvsDebugData.h"
 #include "EventLogger.h"
@@ -21,15 +22,17 @@
 #include "VEDirectSerialReader.h"
 #include "VEDirectParseMessage.h"
 #include "VEDirectDecoder.h"
-#include "configuration.h"
-// #include "dev_configuration.h"
+//#include "configuration.h"
+ #include "dev_configuration.h"
 
 WebServer localWebServer(80);
 
 InfluxDBClient influxClient(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_DATA_BUCKET, INFLUXDB_TOKEN, InfluxDbCloud2CACert);
 InfluxDBClient influxLogClient(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_LOG_BUCKET, INFLUXDB_TOKEN, InfluxDbCloud2CACert);
 
-EventLogger eventLog(influxLogClient, SD_DET, logFileName);
+AsyncMqttClient mqttClient;
+
+EventLogger eventLog(influxLogClient, -1, logFileName);
 
 DHTesp dhtSensorRoom;
 NTCSensor ntcSensor1(NTC_POWER_PIN, NTC1_READ_PIN);
@@ -43,14 +46,14 @@ VEDirectParseMessage mpptData;
 
 ESPNowReceiver greenhouseData;
 
-uint32_t lastUpdate = millis();
-uint32_t lastButtonPush = millis();
-uint32_t lastInverterPowerChange = millis();
-uint32_t lastCameraPowerChange = millis();
+Debounce cameraButtonDebounce;
+Debounce cameraPowerInterval(CAM_RESTART_PERIOD * 1000);
+Debounce influxSendInterval(UPDATE_INTERVAL * 1000);
+Debounce inverterPowerChangeInterval(INV_RETRY_PERIOD * 1000);
+Debounce NTPSyncInterval(NTP_SYNC_INTERVAL * 3600000);
 
 tm timeinfo;
 time_t now;
-uint32_t lastNtpSync = millis();
 
 enum powerSwitch
 {
@@ -60,7 +63,7 @@ enum powerSwitch
 
 powerSwitch inverterPowerState = ON;
 powerSwitch xmasLightState = OFF;
-powerSwitch cameraTarget = ON;
+volatile powerSwitch cameraTarget = ON;
 powerSwitch cameraState = ON;
 
 /*
@@ -81,12 +84,17 @@ struct Field {
 const char *getResetReason(esp_reset_reason_t);
 
 void initWiFi();
+void onMqttConnect(bool sessionPresent);
+void onMqttDisconnect(AsyncMqttClientDisconnectReason reason);
+void onMqttMessage(char *topic, char *payload, AsyncMqttClientMessageProperties properties,
+                   size_t len, size_t index, size_t total);
 bool collectSensorData();
 void sendHouseToInflux();
 Point greenhouseToInflux(GreenhouseSensorData data);
 Point sysStatsToInflux();
 Point houseStatsToInflux();
-Point veToInflux(String pointName, VEDirectParseMessage parsedMessage, std::map<String, int> conversionFactors, std::map<String, String> displayNames, CodeMap codes);
+Point veToInflux(String pointName, VEDirectParseMessage parsedMessage, std::map<String, int> conversionFactors,
+                 std::map<String, String> displayNames, CodeMap codes);
 void controlInverter();
 void controlLight();
 void controlCamera();
@@ -137,6 +145,13 @@ void setup()
   localWebServer.begin();
   eventLog.log("Webbserver startad", EventLogger::LogLevel::INFO);
 
+  mqttClient.onConnect(onMqttConnect);
+  mqttClient.onDisconnect(onMqttDisconnect);
+  mqttClient.onMessage(onMqttMessage);
+  mqttClient.setCredentials(MQTT_USER, MQTT_PASS);
+  mqttClient.setServer(MQTT_HOST, 1883);
+  mqttClient.connect();
+
   if (!influxClient.validateConnection())
     eventLog.log(String("Kunde inte ansluta till Influx DB på " + influxClient.getServerUrl() + "\nFelmeddelande:\n" + influxClient.getLastErrorMessage() + "\n"), EventLogger::LogLevel::ERROR);
 
@@ -160,6 +175,9 @@ void loop()
     WiFi.reconnect();
     eventLog.log("Återansluter till WiFi", EventLogger::LogLevel::INFO);
     delay(500);
+
+    if (WiFi.status() == WL_CONNECTED && !mqttClient.connected())
+      mqttClient.connect();
   }
 
   localWebServer.handleClient();
@@ -175,7 +193,7 @@ void loop()
   controlCamera();
 
   // Send data at regular intervals
-  if (millis() >= lastUpdate + (UPDATE_INTERVAL * 1000))
+  if (influxSendInterval.ready())
   {
     Serial.println("\nSamlar ihop och skickar data till Influx");
     storeDataToNvs("lastState", "Send data triggered");
@@ -195,8 +213,6 @@ void loop()
 
     influxPoints.emplace_back(sysStatsToInflux());
     influxPoints.emplace_back(houseStatsToInflux());
-
-    lastUpdate = millis();
   }
 
   // Fetch greenhouse data if it has been recieved over ESP-NOW
@@ -226,11 +242,8 @@ void loop()
     }
   }
 
-  if (millis() - lastNtpSync > (NTP_SYNC_INTERVAL * 3600000))
-  {
+  if (NTPSyncInterval.ready())
     timeSync(TIME_ZONE, NTP_SERVER1, NTP_SERVER2, NTP_SERVER3);
-    lastNtpSync = millis();
-  }
 
   yield();
 }
@@ -276,6 +289,42 @@ void initWiFi() // Connect to WiFi
   netStat.addField("Transmitter MAC", transmitterMAC);
 
   influxClient.writePoint(netStat);
+}
+
+void onMqttConnect(bool sessionPresent)
+{
+  uint16_t packetId = mqttClient.subscribe(command_topic, 1);
+
+  eventLog.log("MQTT: Ansluten till broker", EventLogger::LogLevel::INFO);
+  eventLog.log(String("MQTT: Prenumererar på " + String(command_topic)), EventLogger::LogLevel::INFO);
+  eventLog.log(String("MQTT: Subscribe packet ID " + String(packetId)), EventLogger::LogLevel::INFO);
+}
+
+void onMqttDisconnect(AsyncMqttClientDisconnectReason reason)
+{
+  eventLog.log("Frånkopplad från MQTT broker", EventLogger::LogLevel::WARNING);
+}
+
+void onMqttMessage(char *topic, char *payload, AsyncMqttClientMessageProperties properties,
+                   size_t len, size_t index, size_t total)
+{
+  if (strcmp(topic, command_topic) != 0)
+    return;
+
+  String message;
+  for (size_t i = 0; i < len; i++)
+    message += (char)payload[i];
+
+  if (message == "ON")
+  {
+    cameraTarget = ON;
+    eventLog.log("MQTT: Kamera ON-kommando mottaget", EventLogger::LogLevel::INFO);
+  }
+  else if (message == "OFF")
+  {
+    cameraTarget = OFF;
+    eventLog.log("MQTT: Kamera OFF-kommando mottaget", EventLogger::LogLevel::INFO);
+  }
 }
 
 Point greenhouseToInflux(GreenhouseSensorData data)
@@ -367,6 +416,9 @@ Point veToInflux(String pointName, VEDirectParseMessage parsedMessage, std::map<
 
 void controlInverter()
 {
+  if (!inverterPowerChangeInterval.ready())
+    return;
+
   const auto &intData = mpptData.getIntMap(); // Battery voltage in mV. Using MPPT voltage, since Inv. voltage = 0 when off
 
   auto it = intData.find("V");
@@ -376,10 +428,6 @@ void controlInverter()
     return;
   }
   const int voltage = it->second;
-
-  // If state changed more recent than retry period, do nothing
-  if (millis() - lastInverterPowerChange < (INV_RETRY_PERIOD * 1000))
-    return;
 
   // Do nothing on coco-bananas values (<1 V or >20 V)
   if (voltage < 1000 || voltage > 20000)
@@ -393,7 +441,6 @@ void controlInverter()
   if (inverterPowerState == ON && voltage < INV_OFF_VOLTAGE)
   {
     digitalWrite(RELAY_INV, HIGH); // Relay is NC, so triggering it will turn off the inverter
-    lastInverterPowerChange = millis();
     inverterPowerState = OFF;
     eventLog.log("Inverter stängdes av, låg batterispänning", EventLogger::LogLevel::INFO);
     return;
@@ -403,7 +450,6 @@ void controlInverter()
   if (inverterPowerState == OFF && voltage > INV_ON_VOLTAGE)
   {
     digitalWrite(RELAY_INV, LOW); // Relay is NC, so releasing it will turn on the inverter
-    lastInverterPowerChange = millis();
     inverterPowerState = ON;
     eventLog.log("Inverter slogs på, tillräcklig batterispänning ", EventLogger::LogLevel::INFO);
     return;
@@ -446,10 +492,9 @@ void controlCamera()
   if (cameraState == cameraTarget)
     return;
 
-  if (millis() < lastCameraPowerChange + (CAM_RESTART_PERIOD * 1000))
+  if (!cameraPowerInterval.ready())
     return;
 
-  lastCameraPowerChange = millis();
   cameraState = cameraTarget;
 
   Serial.println("Camera state change");
@@ -460,41 +505,26 @@ void controlCamera()
   case ON:
     digitalWrite(BUTTON_LED, LOW); // Green light off when cam on
     digitalWrite(RELAY_CAM, LOW);  // Relay is NC
+    mqttClient.publish(state_topic, 1, true, "ON");
     eventLog.log("Camera turned on", EventLogger::LogLevel::INFO);
     break;
-    
-    case OFF:
+
+  case OFF:
     digitalWrite(BUTTON_LED, HIGH); // Green light indicates cam is OFF
     digitalWrite(RELAY_CAM, HIGH);  // Relay is NC
+    mqttClient.publish(state_topic, 1, true, "OFF");
     eventLog.log("Camera turned off", EventLogger::LogLevel::INFO);
     break;
-    
-    default:
+
+  default:
     Serial.print("Camera target was ");
     Serial.println(cameraTarget);
     break;
-
   }
 }
 
 void IRAM_ATTR camButtonPush()
 {
-  if (millis() < lastButtonPush + BUTTON_DEBOUNCE_TIME)
-    return;
-  lastButtonPush = millis();
-
-  switch (cameraTarget)
-  {
-  case ON:
-    cameraTarget = OFF;
-    break;
-
-  case OFF:
-    cameraTarget = ON;
-    break;
-
-  default:
-    cameraTarget = ON;
-    break;
-  }
+  if (cameraButtonDebounce.ready())
+    cameraTarget = (cameraTarget == ON) ? OFF : ON;
 }
