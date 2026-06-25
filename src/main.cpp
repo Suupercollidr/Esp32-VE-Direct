@@ -47,7 +47,6 @@ VEDirectParseMessage mpptData;
 ESPNowReceiver greenhouseData;
 
 Debounce cameraButtonDebounce;
-Debounce cameraPowerInterval(CAM_RESTART_PERIOD * 1000);
 Debounce influxSendInterval(UPDATE_INTERVAL * 1000);
 Debounce inverterPowerChangeInterval(INV_RETRY_PERIOD * 1000);
 Debounce NTPSyncInterval(NTP_SYNC_INTERVAL * 3600000);
@@ -119,17 +118,17 @@ void setup()
   pinMode(RELAY_LIGHT, OUTPUT);
   pinMode(RELAY_CAM, OUTPUT);
   pinMode(RELAY_AUX, OUTPUT);
-  pinMode(BUTTON_LED, OUTPUT);
-  pinMode(CAM_SWITCH, INPUT_PULLUP);
+  pinMode(LED_CAM_BUTTON, OUTPUT);
+  pinMode(CAM_BUTTON, INPUT_PULLUP);
 
-  attachInterrupt(digitalPinToInterrupt(CAM_SWITCH), camButtonPush, FALLING);
+  attachInterrupt(digitalPinToInterrupt(CAM_BUTTON), camButtonPush, FALLING);
 
   // Make sure relay positions match the corresponding power switch
   digitalWrite(RELAY_INV, HIGH);                                  // NC
   digitalWrite(RELAY_LIGHT, (xmasLightState == ON) ? HIGH : LOW); // NO
   digitalWrite(RELAY_CAM, (cameraState == ON) ? HIGH : LOW);      // NC
   digitalWrite(RELAY_AUX, LOW);
-  digitalWrite(BUTTON_LED, LOW);
+  digitalWrite(LED_CAM_BUTTON, LOW);
 
   greenhouseData.begin();
 
@@ -492,9 +491,6 @@ void controlCamera()
   if (cameraState == cameraTarget)
     return;
 
-  if (!cameraPowerInterval.ready())
-    return;
-
   cameraState = cameraTarget;
 
   Serial.println("Camera state change");
@@ -503,14 +499,14 @@ void controlCamera()
   switch (cameraState)
   {
   case ON:
-    digitalWrite(BUTTON_LED, LOW); // Green light off when cam on
+    digitalWrite(LED_CAM_BUTTON, LOW); // Green light off when cam on
     digitalWrite(RELAY_CAM, LOW);  // Relay is NC
     mqttClient.publish(state_topic, 1, true, "ON");
     eventLog.log("Camera turned on", EventLogger::LogLevel::INFO);
     break;
 
   case OFF:
-    digitalWrite(BUTTON_LED, HIGH); // Green light indicates cam is OFF
+    digitalWrite(LED_CAM_BUTTON, HIGH); // Green light indicates cam is OFF
     digitalWrite(RELAY_CAM, HIGH);  // Relay is NC
     mqttClient.publish(state_topic, 1, true, "OFF");
     eventLog.log("Camera turned off", EventLogger::LogLevel::INFO);

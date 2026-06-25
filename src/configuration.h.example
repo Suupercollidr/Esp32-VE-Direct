@@ -43,7 +43,6 @@ const int UPDATE_INTERVAL = 5; // How often to send data, in seconds
 const int INV_OFF_VOLTAGE = 11000; // mV
 const int INV_ON_VOLTAGE = 13000;  // mV
 const int INV_RETRY_PERIOD = 1800; // seconds
-const int CAM_RESTART_PERIOD = 1; // seconds
 
 
 // Define pins
