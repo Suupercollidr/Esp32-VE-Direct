@@ -126,7 +126,7 @@ void setup()
   // Make sure relay positions match the corresponding power switch
   digitalWrite(RELAY_INV, HIGH);                                  // NC
   digitalWrite(RELAY_LIGHT, (xmasLightState == ON) ? HIGH : LOW); // NO
-  digitalWrite(RELAY_CAM, (cameraState == ON) ? HIGH : LOW);      // NC
+  digitalWrite(RELAY_CAM, (cameraState == ON) ? LOW : HIGH);      // NC
   digitalWrite(RELAY_AUX, LOW);
   digitalWrite(LED_CAM_BUTTON, LOW);
 
