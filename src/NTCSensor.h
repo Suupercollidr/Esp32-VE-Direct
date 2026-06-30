@@ -74,7 +74,7 @@ public:
         if (roundedTemperature > -200 && roundedTemperature < 200) // Return only reasonable temperatures
             return roundedTemperature;
 
-        eventLog.log("Orealistisk temperatur från NTC på pin " + String(readPin) + " (" + String(roundedTemperature) + "°C)", EventLogger::LogLevel::WARNING);
+        eventLog.log("Orealistisk temperatur från NTC på pin " + String(readPin) + " (" + String(roundedTemperature) + "°C)", EventLogger::LogLevel::DATA);
         return std::nullopt;
     }
 };

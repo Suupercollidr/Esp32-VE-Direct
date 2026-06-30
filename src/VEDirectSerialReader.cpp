@@ -63,7 +63,7 @@ char *VEDirectSerialReader::messageToLinearBuffer(const char *ringBuffer, size_t
 {
     if (start >= BUFFER_SIZE || end >= BUFFER_SIZE)
     {
-        eventLog.log("Start- eller slutposition utanför bufferten", EventLogger::LogLevel::WARNING);
+        eventLog.log("Start- eller slutposition utanför bufferten", EventLogger::LogLevel::DATA);
         return nullptr;
     }
 
@@ -156,7 +156,7 @@ bool VEDirectSerialReader::update()
 
     if (!verifyChecksum(message, length))
     {
-        eventLog.log("Felaktig kontrollsumma för:\n" + String(message), EventLogger::LogLevel::WARNING);
+        eventLog.log("Felaktig kontrollsumma för:\n" + String(message), EventLogger::LogLevel::DATA);
         delete[] message;
         return false;
     }

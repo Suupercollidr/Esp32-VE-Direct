@@ -23,7 +23,7 @@ private:
     {
         if (len != sizeof(GreenhouseSensorData))
         {
-            eventLog.log("Received data has invalid length: " + String(len), EventLogger::LogLevel::WARNING);
+            eventLog.log("Received data has invalid length: " + String(len), EventLogger::LogLevel::DATA);
             return;
         }
 
@@ -36,7 +36,7 @@ private:
 
         if (!verifyChecksum())
         {
-            eventLog.log("Recieved data has invalid checksum", EventLogger::LogLevel::WARNING);
+            eventLog.log("Recieved data has invalid checksum", EventLogger::LogLevel::DATA);
             return;
         }
         checkSensorStatus();

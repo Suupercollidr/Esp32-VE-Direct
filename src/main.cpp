@@ -50,6 +50,7 @@ Debounce cameraButtonDebounce;
 Debounce influxSendInterval(UPDATE_INTERVAL * 1000);
 Debounce inverterPowerChangeInterval(INV_RETRY_PERIOD * 1000);
 Debounce NTPSyncInterval(NTP_SYNC_INTERVAL * 3600000);
+Debounce MQTTReconnect(10000);
 
 tm timeinfo;
 time_t now;
@@ -134,6 +135,18 @@ void setup()
 
   initWiFi();
 
+  // Testa om MQTT-brokers IP är nåbar via TCP
+  WiFiClient testClient;
+  if (testClient.connect(MQTT_HOST, 1883))
+  {
+    eventLog.log("TCP-anslutning till MQTT-broker lyckades", EventLogger::LogLevel::INFO);
+    testClient.stop();
+  }
+  else
+  {
+    eventLog.log("TCP-anslutning till MQTT-broker MISSLYCKADES", EventLogger::LogLevel::ERROR);
+  }
+
   timeSync(TIME_ZONE, NTP_SERVER1, NTP_SERVER2, NTP_SERVER3);
 
   // OTA
@@ -177,6 +190,12 @@ void loop()
 
     if (WiFi.status() == WL_CONNECTED && !mqttClient.connected())
       mqttClient.connect();
+  }
+
+  if (MQTTReconnect.ready())
+  {
+    eventLog.log("Försöker återansluta till MQTT...", EventLogger::LogLevel::INFO);
+    mqttClient.connect();
   }
 
   localWebServer.handleClient();
@@ -292,22 +311,24 @@ void initWiFi() // Connect to WiFi
 
 void onMqttConnect(bool sessionPresent)
 {
-  uint16_t packetId = mqttClient.subscribe(command_topic, 1);
+  uint16_t packetId = mqttClient.subscribe(camera_command_topic, 1);
 
   eventLog.log("MQTT: Ansluten till broker", EventLogger::LogLevel::INFO);
-  eventLog.log(String("MQTT: Prenumererar på " + String(command_topic)), EventLogger::LogLevel::INFO);
+  eventLog.log(String("MQTT: Prenumererar på " + String(camera_command_topic)), EventLogger::LogLevel::INFO);
   eventLog.log(String("MQTT: Subscribe packet ID " + String(packetId)), EventLogger::LogLevel::INFO);
 }
 
 void onMqttDisconnect(AsyncMqttClientDisconnectReason reason)
 {
-  eventLog.log("Frånkopplad från MQTT broker", EventLogger::LogLevel::WARNING);
+  String message = "Frånkopplad från MQTT-broker p.g.a.: ";
+  message += static_cast<int>(reason);
+  eventLog.log(message, EventLogger::LogLevel::WARNING);
 }
 
 void onMqttMessage(char *topic, char *payload, AsyncMqttClientMessageProperties properties,
                    size_t len, size_t index, size_t total)
 {
-  if (strcmp(topic, command_topic) != 0)
+  if (strcmp(topic, camera_command_topic) != 0)
     return;
 
   String message;
@@ -500,15 +521,15 @@ void controlCamera()
   {
   case ON:
     digitalWrite(LED_CAM_BUTTON, LOW); // Green light off when cam on
-    digitalWrite(RELAY_CAM, LOW);  // Relay is NC
-    mqttClient.publish(state_topic, 1, true, "ON");
+    digitalWrite(RELAY_CAM, LOW);      // Relay is NC
+    mqttClient.publish(camera_state_topic, 1, true, "ON");
     eventLog.log("Camera turned on", EventLogger::LogLevel::INFO);
     break;
 
   case OFF:
     digitalWrite(LED_CAM_BUTTON, HIGH); // Green light indicates cam is OFF
-    digitalWrite(RELAY_CAM, HIGH);  // Relay is NC
-    mqttClient.publish(state_topic, 1, true, "OFF");
+    digitalWrite(RELAY_CAM, HIGH);      // Relay is NC
+    mqttClient.publish(camera_state_topic, 1, true, "OFF");
     eventLog.log("Camera turned off", EventLogger::LogLevel::INFO);
     break;
 

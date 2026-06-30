@@ -15,7 +15,7 @@ String VEDirectDecoder::VEDirectCodeToHumanReadable(const String &label, int val
 
     if (codes.empty())
     {
-        eventLog.log("Hittade inga felmeddelanden för \"" + label + "\" " + String(value));
+        eventLog.log("Hittade inga felmeddelanden för \"" + label + "\" " + String(value), EventLogger::LogLevel::DATA);
         result = String(value); // If we can't find anything, keep the numerical value
         return result;
     }
@@ -70,7 +70,7 @@ std::vector<int> VEDirectDecoder::findCodes(const String &label, int value)
 
     if (availableCodes.empty())
     {
-        eventLog.log("No error codes found for " + label + " (error code " + value + ")");
+        eventLog.log("No error codes found for " + label + " (error code " + value + ")", EventLogger::LogLevel::DATA);
         return {};
     }
     return findCombination(availableCodes, value);
@@ -136,7 +136,7 @@ std::vector<int> VEDirectDecoder::findCombination(
     // Not an exact match, fail safely
     if (remaining != 0)
     {
-        eventLog.log(String("Failed to find error codes in " + value), EventLogger::LogLevel::WARNING);
+        eventLog.log(String("Failed to find error codes in " + value), EventLogger::LogLevel::DATA);
         return {};
     }
     return result;

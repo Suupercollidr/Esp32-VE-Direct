@@ -32,8 +32,8 @@ IPAddress secondaryDNS(8, 8, 4, 4); // Google secondary DNS
 const char *MQTT_HOST = "0.0.0.0";
 const char *MQTT_USER = "USER"; 
 const char *MQTT_PASS = "PASS";
-const char *command_topic = "home/security/cameras/command";
-const char *state_topic = "home/security/cameras/state";
+const char *camera_command_topic = "home/security/cameras/command";
+const char *camera_state_topic = "home/security/cameras/state";
 
 // MAC address for transmitting ESP32 (greenhouse)
 uint8_t transmitterMAC[] = {MAC};
