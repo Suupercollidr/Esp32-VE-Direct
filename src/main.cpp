@@ -21,8 +21,8 @@
 #include "VEDirectSerialReader.h"
 #include "VEDirectParseMessage.h"
 #include "VEDirectDecoder.h"
-//#include "configuration.h"
-#include "dev_configuration.h"
+#include "configuration.h"
+//#include "dev_configuration.h"
 
 WebServer localWebServer(80);
 
@@ -43,9 +43,9 @@ VEDirectParseMessage mpptData;
 
 ESPNowReceiver greenhouseData;
 
-Debounce influxSendInterval(UPDATE_INTERVAL * 1000);
-Debounce inverterPowerChangeInterval(INV_RETRY_PERIOD * 1000);
+Debounce WiFiConnectTimeout(30000); // Used for both intial connect and reconnect period
 Debounce NTPSyncInterval(NTP_SYNC_INTERVAL * 3600000);
+Debounce influxSendInterval(UPDATE_INTERVAL * 1000);
 
 tm timeinfo;
 time_t now;
@@ -68,6 +68,7 @@ struct Field {
 const char *getResetReason(esp_reset_reason_t);
 
 void initWiFi();
+void reconnectWiFi();
 bool collectSensorData();
 void sendHouseToInflux();
 Point greenhouseToInflux(GreenhouseSensorData data);
@@ -122,12 +123,8 @@ void loop()
 {
   storeDataToNvs("lastState", "Loop");
 
-  if (WiFi.status() != WL_CONNECTED)
-  {
-    WiFi.reconnect();
-    eventLog.log("Återansluter till WiFi", EventLogger::LogLevel::INFO);
-    delay(500);
-  }
+  if (!WiFi.isConnected())
+    reconnectWiFi();
 
   localWebServer.handleClient();
   ElegantOTA.loop();
@@ -198,16 +195,21 @@ void loop()
 
 void initWiFi() // Connect to WiFi
 {
-  storeDataToNvs("lastState", "initWiFi");
   eventLog.log(String("Ansluter till WiFi " + String(ssid)), EventLogger::LogLevel::INFO);
   eventLog.log(String("MAC-adress: " + WiFi.macAddress()), EventLogger::LogLevel::INFO);
 
+  WiFi.setHostname(hostname);
   WiFi.begin(ssid, password, 6);
-  while (WiFi.status() != WL_CONNECTED)
+  while (!WiFi.isConnected())
   {
+    if (WiFiConnectTimeout.ready())
+    {
+      Serial.println("💥  ");
+      eventLog.log("Kunde inte ansluta till WiFi, startar om", EventLogger::LogLevel::ERROR);
+      ESP.restart();
+    }
     delay(100);
-
-    Serial.print(".");
+    Serial.print("🛜  ");
   }
   IPAddress myIp = WiFi.localIP();
   const String myIpString = String(myIp[0]) + "." +
@@ -234,9 +236,17 @@ void initWiFi() // Connect to WiFi
   netStat.addField("IP address", myIpString);
   netStat.addField("Gateway", gwIpString);
   netStat.addField("MAC address", WiFi.macAddress());
-  netStat.addField("Transmitter MAC", transmitterMAC);
 
-  influxClient.writePoint(netStat);
+  influxLogClient.writePoint(netStat);
+}
+
+void reconnectWiFi()
+{
+  if (!WiFiConnectTimeout.ready())
+    return;
+
+  eventLog.log("Återansluter till WiFi", EventLogger::LogLevel::INFO);
+  WiFi.reconnect();
 }
 
 Point greenhouseToInflux(GreenhouseSensorData data)
