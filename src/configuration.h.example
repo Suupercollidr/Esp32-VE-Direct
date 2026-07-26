@@ -38,11 +38,13 @@ const int INV_ON_VOLTAGE = 13000;  // mV
 const int INV_RETRY_PERIOD = 1800; // seconds
 
 // Define pins
-#define RXD1 17
+#define ONBOARD_BUTTON 0
+#define ONBOARD_LED 39
+#define RXD1 15
 #define TXD1 16
-#define RXD2 14
-#define TXD2 13
-#define DHT_PIN 33 // (A5)
-#define NTC1_READ_PIN A0 // (GPIO 36) Pin, to which the voltage divider is connected
-#define NTC2_READ_PIN A3 // (GPIO 39) Pin, to which the voltage divider is connected
-#define NTC_POWER_PIN 32 // (A4) 3.3V for the voltage divider
+#define RXD2 17
+#define TXD2 18
+#define DHT_PIN 4
+#define NTC1_READ_PIN 6 
+#define NTC2_READ_PIN 7
+#define NTC_POWER_PIN 5 // (A4) 3.3V for the voltage divider

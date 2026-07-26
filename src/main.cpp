@@ -10,6 +10,7 @@
 #include <RTClib.h>
 #include <InfluxDbClient.h>
 #include <InfluxDbCloud.h>
+#include <AsyncMqttClient.h>
 #include <DHTesp.h>
 #include "maputils.h"
 #include "debounce.h"
@@ -22,17 +23,21 @@
 #include "VEDirectParseMessage.h"
 #include "VEDirectDecoder.h"
 #include "configuration.h"
-//#include "dev_configuration.h"
+// #include "dev_configuration.h"
 
 WebServer localWebServer(80);
 
 InfluxDBClient influxClient(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_DATA_BUCKET, INFLUXDB_TOKEN, InfluxDbCloud2CACert);
 InfluxDBClient influxLogClient(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_LOG_BUCKET, INFLUXDB_TOKEN, InfluxDbCloud2CACert);
 
-EventLogger eventLog(influxLogClient, -1, logFileName);
+AsyncMqttClient mqttClient;
+MqttTopics topics;
+Debounce MQTTReconnect(10000);
+
+EventLogger eventLog(influxLogClient, -1, logFileName, hostname);
 
 DHTesp dhtSensorRoom;
-NTCSensor ntcSensor1(NTC_POWER_PIN, NTC1_READ_PIN);
+NTCSensor ntcSensor1(NTC_POWER_PIN, NTC1_READ_PIN, 10000, 25, 3435, 10000);
 NTCSensor ntcSensor2(NTC_POWER_PIN, NTC2_READ_PIN);
 
 VEDirectSerialReader victronInverter(Serial1);
@@ -66,9 +71,9 @@ struct Field {
 */
 
 const char *getResetReason(esp_reset_reason_t);
-
-void initWiFi();
-void reconnectWiFi();
+void reconnectMqtt();
+void onMqttConnect(bool sessionPresent);
+void onMqttDisconnect(AsyncMqttClientDisconnectReason reason);
 bool collectSensorData();
 void sendHouseToInflux();
 Point greenhouseToInflux(GreenhouseSensorData data);
@@ -76,6 +81,7 @@ Point sysStatsToInflux();
 Point houseStatsToInflux();
 Point veToInflux(String pointName, VEDirectParseMessage parsedMessage, std::map<String, int> conversionFactors,
                  std::map<String, String> displayNames, CodeMap codes);
+
 
 void setup()
 {
@@ -93,13 +99,38 @@ void setup()
 
   greenhouseData.begin();
 
-  initWiFi();
+  WiFi.setHostname(hostname);
+  WiFi.begin(ssid, password);
+
+  while (!WiFi.isConnected())
+  {
+    Serial.print("Connecting to WiFi " + String(ssid));
+    Serial.print(" 🛜 ");
+    delay(100);
+    if (millis() > (wifiTimeout * 1000))
+    {
+      storeDataToNvs("lastState", "Failed to connect");
+      delay(200);
+      ESP.restart();
+    }
+  }
+  eventLog.log("Ansluten till WiFi " + String(ssid), EventLogger::LogLevel::INFO);
 
   timeSync(TIME_ZONE, NTP_SERVER1, NTP_SERVER2, NTP_SERVER3);
 
+  Point netStat("Network");
+  netStat.addTag("hostname", WiFi.getHostname());
+  netStat.addTag("device", WiFi.getHostname());
+  netStat.addField("Channel", WiFi.channel());
+  netStat.addField("IP address", WiFi.localIP().toString());
+  netStat.addField("Gateway", WiFi.gatewayIP().toString());
+  netStat.addField("MAC address", WiFi.macAddress());
+  eventLog.writePoint(netStat);
+
   // OTA
   localWebServer.on("/", []()
-                    { localWebServer.send(200, "text/plain", "Tere tulemast Eesti saatkonda!"); });
+                    { String websiteContents = "Tere tulemast Eesti saatkonda!\nJaotis: " + String(hostname);
+    localWebServer.send(200, "text/plain", websiteContents); });
   ElegantOTA.setAuth(otaUsername, otaPassword);
   ElegantOTA.begin(&localWebServer);
   localWebServer.begin();
@@ -108,7 +139,16 @@ void setup()
   if (!influxClient.validateConnection())
     eventLog.log(String("Kunde inte ansluta till Influx DB på " + influxClient.getServerUrl() + "\nFelmeddelande:\n" + influxClient.getLastErrorMessage() + "\n"), EventLogger::LogLevel::ERROR);
 
+  mqttClient.onConnect(onMqttConnect);
+  mqttClient.onDisconnect(onMqttDisconnect);
+  mqttClient.setCredentials(MQTT_USER, MQTT_PASS);
+  mqttClient.setServer(MQTT_HOST, 1883);
+  mqttClient.setWill(topics.esp32_status_topic, 1, true, "offline");
+  mqttClient.connect();
+
   dhtSensorRoom.setup(DHT_PIN, DHTesp::DHT11);
+
+  eventLog.sendPendingPoints();
 
   float setupTime = millis() / 1000.0f;
 
@@ -124,7 +164,18 @@ void loop()
   storeDataToNvs("lastState", "Loop");
 
   if (!WiFi.isConnected())
-    reconnectWiFi();
+  {
+    WiFi.reconnect();
+    if (millis() > (wifiTimeout * 1000))
+    {
+      storeDataToNvs("lastState", "Failed to connect");
+      delay(200);
+      ESP.restart();
+    }
+  }
+
+  if (!mqttClient.connected())
+    reconnectMqtt();
 
   localWebServer.handleClient();
   ElegantOTA.loop();
@@ -143,18 +194,19 @@ void loop()
     Serial.println("\nSamlar ihop och skickar data till Influx");
     storeDataToNvs("lastState", "Send data triggered");
 
-    // controlInverter(); // Turn off fridge if power is low
-    // controlLight();
-
     inverterData.stringToMap(victronInverter.getMessage());
     mpptData.stringToMap(victronMppt.getMessage());
 
     // Victron VE.Direct units
     if (!inverterData.getIntMap().empty())
+    {
       influxPoints.emplace_back(veToInflux("Inverter", inverterData, inverterConversions, inverterDisplayNames, inverterCodes));
+    }
     const auto &mpptDataMap = mpptData.getIntMap();
     if (!mpptDataMap.empty())
+    {
       influxPoints.emplace_back(veToInflux("MPPT", mpptData, mpptConversions, mpptDisplayNames, mpptCodes));
+    }
 
     influxPoints.emplace_back(sysStatsToInflux());
     influxPoints.emplace_back(houseStatsToInflux());
@@ -193,60 +245,33 @@ void loop()
   yield();
 }
 
-void initWiFi() // Connect to WiFi
+void reconnectMqtt()
 {
-  eventLog.log(String("Ansluter till WiFi " + String(ssid)), EventLogger::LogLevel::INFO);
-  eventLog.log(String("MAC-adress: " + WiFi.macAddress()), EventLogger::LogLevel::INFO);
-
-  WiFi.setHostname(hostname);
-  WiFi.begin(ssid, password, 6);
-  while (!WiFi.isConnected())
-  {
-    if (WiFiConnectTimeout.ready())
-    {
-      Serial.println("💥  ");
-      eventLog.log("Kunde inte ansluta till WiFi, startar om", EventLogger::LogLevel::ERROR);
-      ESP.restart();
-    }
-    delay(100);
-    Serial.print("🛜  ");
-  }
-  IPAddress myIp = WiFi.localIP();
-  const String myIpString = String(myIp[0]) + "." +
-                            String(myIp[1]) + "." +
-                            String(myIp[2]) + "." +
-                            String(myIp[3]);
-
-  IPAddress gwIp = WiFi.gatewayIP();
-  const String gwIpString = String(gwIp[0]) + "." +
-                            String(gwIp[1]) + "." +
-                            String(gwIp[2]) + "." +
-                            String(gwIp[3]);
-
-  Serial.println();
-  eventLog.log("Ansluten till WiFi " + String(ssid), EventLogger::LogLevel::INFO);
-  Serial.flush();
-  Serial.println("\t\t\t\t\tKanal    \t" + WiFi.channel());
-  Serial.println("\t\t\t\t\tIP-adress\t" + myIpString);
-  Serial.println("\t\t\t\t\tGateway  \t" + gwIpString);
-
-  Point netStat("Network");
-  netStat.addField("Channel", WiFi.channel());
-  netStat.addField("Hostname", WiFi.getHostname());
-  netStat.addField("IP address", myIpString);
-  netStat.addField("Gateway", gwIpString);
-  netStat.addField("MAC address", WiFi.macAddress());
-
-  influxLogClient.writePoint(netStat);
-}
-
-void reconnectWiFi()
-{
-  if (!WiFiConnectTimeout.ready())
+  if (!MQTTReconnect.ready())
     return;
 
-  eventLog.log("Återansluter till WiFi", EventLogger::LogLevel::INFO);
-  WiFi.reconnect();
+  if (!WiFi.isConnected()) // Need WiFi to connect to MQTT broker
+    return;
+
+  eventLog.log("Försöker återansluta till MQTT...", EventLogger::LogLevel::INFO);
+  mqttClient.connect();
+}
+
+void onMqttConnect(bool sessionPresent)
+{
+  mqttClient.publish(topics.esp32_status_topic, 1, true, "online");
+
+  eventLog.log("MQTT: Ansluten till broker", EventLogger::LogLevel::INFO);
+}
+
+void onMqttDisconnect(AsyncMqttClientDisconnectReason reason)
+{
+  String message = "Frånkopplad från MQTT-broker p.g.a.: ";
+  message += static_cast<int>(reason);
+  eventLog.log(message, EventLogger::LogLevel::WARNING);
+
+  if (reason != AsyncMqttClientDisconnectReason::MQTT_NOT_AUTHORIZED)
+    reconnectMqtt();
 }
 
 Point greenhouseToInflux(GreenhouseSensorData data)
