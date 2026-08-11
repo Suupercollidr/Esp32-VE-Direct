@@ -18,6 +18,7 @@
 #include "nvsDebugData.h"
 #include "EventLogger.h"
 #include "mappings.h"
+#include "mappingsMqtt.h"
 #include "NTCSensor.h"
 #include "VEDirectSerialReader.h"
 #include "VEDirectParseMessage.h"
@@ -29,6 +30,9 @@ WebServer localWebServer(80);
 
 InfluxDBClient influxClient(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_DATA_BUCKET, INFLUXDB_TOKEN, InfluxDbCloud2CACert);
 InfluxDBClient influxLogClient(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_LOG_BUCKET, INFLUXDB_TOKEN, InfluxDbCloud2CACert);
+
+Debounce influxVerifyTimer(60000);
+uint8_t influxFailedAttempts = 0;
 
 AsyncMqttClient mqttClient;
 MqttTopics topics;
@@ -79,9 +83,18 @@ void sendHouseToInflux();
 Point greenhouseToInflux(GreenhouseSensorData data);
 Point sysStatsToInflux();
 Point houseStatsToInflux();
-Point veToInflux(String pointName, VEDirectParseMessage parsedMessage, std::map<String, int> conversionFactors,
-                 std::map<String, String> displayNames, CodeMap codes);
-
+Point veToInflux(String pointName,
+                 VEDirectParseMessage parsedMessage,
+                 std::map<String, int> conversionFactors,
+                 std::map<String, String> displayNames,
+                 CodeMap codes);
+void veToMqtt(VEDirectParseMessage parsedMessage,
+              std::map<String, int> conversionFactors,
+              const std::map<String, String> mqttTopics);
+void greenhouseToMqtt(GreenhouseSensorData data);
+void publishMqtt(const String &topic,
+                 const String &payload,
+                 bool retain = false);
 
 void setup()
 {
@@ -201,11 +214,13 @@ void loop()
     if (!inverterData.getIntMap().empty())
     {
       influxPoints.emplace_back(veToInflux("Inverter", inverterData, inverterConversions, inverterDisplayNames, inverterCodes));
+      veToMqtt(inverterData, inverterConversions, inverterMqttMappings);
     }
     const auto &mpptDataMap = mpptData.getIntMap();
     if (!mpptDataMap.empty())
     {
       influxPoints.emplace_back(veToInflux("MPPT", mpptData, mpptConversions, mpptDisplayNames, mpptCodes));
+      veToMqtt(mpptData, mpptConversions, mpptMqttMappings);
     }
 
     influxPoints.emplace_back(sysStatsToInflux());
@@ -221,6 +236,7 @@ void loop()
     auto data = greenhouseData.getData();
     greenhouseData.clearNewDataFlag();
     influxPoints.emplace_back(greenhouseToInflux(data));
+    greenhouseToMqtt(data);
   }
 
   // Send all gathered data to InfluxDB
@@ -242,6 +258,15 @@ void loop()
   if (NTPSyncInterval.ready())
     timeSync(TIME_ZONE, NTP_SERVER1, NTP_SERVER2, NTP_SERVER3);
 
+  if (influxVerifyTimer.ready())
+  {
+    influxClient.validateConnection() ? influxFailedAttempts = 0 : influxFailedAttempts++;
+    if (influxFailedAttempts > 5)
+    {
+      ESP.restart();
+    }
+  }
+
   yield();
 }
 
@@ -260,6 +285,7 @@ void reconnectMqtt()
 void onMqttConnect(bool sessionPresent)
 {
   mqttClient.publish(topics.esp32_status_topic, 1, true, "online");
+  uint16_t packetId = mqttClient.subscribe(topics.esp32_restart_topic, 1);
 
   eventLog.log("MQTT: Ansluten till broker", EventLogger::LogLevel::INFO);
 }
@@ -272,6 +298,24 @@ void onMqttDisconnect(AsyncMqttClientDisconnectReason reason)
 
   if (reason != AsyncMqttClientDisconnectReason::MQTT_NOT_AUTHORIZED)
     reconnectMqtt();
+}
+
+void onMqttMessage(char *topic, char *payload, AsyncMqttClientMessageProperties properties,
+                   size_t len, size_t index, size_t total)
+{
+  if (strcmp(topic, topics.esp32_restart_topic) != 0)
+    return;
+
+  String message;
+  for (size_t i = 0; i < len; i++)
+    message += (char)payload[i];
+
+  if (message == "RESTART")
+  {
+    eventLog.log("Startar om på begäran från MQTT", EventLogger::LogLevel::INFO);
+    delay(1000);
+    ESP.restart();
+  }
 }
 
 Point greenhouseToInflux(GreenhouseSensorData data)
@@ -296,6 +340,12 @@ Point greenhouseToInflux(GreenhouseSensorData data)
   return dataPoint;
 }
 
+void greenhouseToMqtt(GreenhouseSensorData data)
+{
+  publishMqtt(String(topics.greenhouseIndoorTemp), String((data.indoorTemp / 10.0)));
+  publishMqtt(String(topics.greenhouseOutdoorTemp), String((data.outdoorTemp / 10.0)));
+}
+
 Point sysStatsToInflux()
 {
   storeDataToNvs("lastState", "sysStatsToInflux");
@@ -317,12 +367,16 @@ Point houseStatsToInflux()
 
   Point houseStats("Huvudbyggnad");
   if (auto temperature = ntcSensor1.temperature(); temperature.has_value())
+  {
     houseStats.addField("Temp_kyl", temperature.value());
-
+    publishMqtt(topics.refrigeratorTemp, String(temperature.value()));
+  }
   if (auto temperature = ntcSensor2.temperature(); temperature.has_value())
+  {
     houseStats.addField("Temp_frys", temperature.value());
-
+  }
   houseStats.addField("Rumstemp_1", dhtSensorRoom.getTemperature());
+  publishMqtt(topics.roomTemp, String(dhtSensorRoom.getTemperature()));
   houseStats.addField("Luftfukt_1", dhtSensorRoom.getHumidity());
 
   return houseStats;
@@ -356,4 +410,29 @@ Point veToInflux(String pointName, VEDirectParseMessage parsedMessage, std::map<
     newPoint.addField(key, val);
 
   return newPoint;
+}
+
+void veToMqtt(VEDirectParseMessage parsedMessage,
+              std::map<String, int> conversionFactors,
+              const std::map<String, String> mqttTopics)
+{
+  const auto &intData = parsedMessage.getIntMap();
+  for (auto const &[key, val] : intData)
+  {
+    if (!mqttTopics.count(key))
+      continue;
+
+    float floatVal = conversionFactors.count(key)
+                         ? static_cast<float>(val) / conversionFactors.at(key)
+                         : static_cast<float>(val);
+
+    publishMqtt(mqttTopics.at(key), String(floatVal, 2));
+  }
+}
+
+void publishMqtt(const String &topic, const String &payload, bool retain)
+{
+  if (!mqttClient.connected())
+    return;
+  mqttClient.publish(topic.c_str(), 0, retain, payload.c_str());
 }

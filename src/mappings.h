@@ -188,8 +188,6 @@ const CodeMap mapLabelCodeText{
 
 */
 
-
-
 // Refactor
 // using CodeMap = std::map<String, std::map<int, String>>;
 
@@ -279,6 +277,7 @@ const std::map<String, String> inverterDisplayNames{
     {"OR", "Av-orsak  (växelriktare)"},
     {"AR", "Larmorsak (växelriktare)"},
     {"WARN", "Felorsak (växelriktare)"},
+    {"PID", "Produkt-ID"}
 };
 
 const std::map<String, int> mpptConversions{
@@ -389,5 +388,5 @@ const std::map<String, String> mpptDisplayNames{
     {"Relay", "Reläläge (laddningsregulator)"},
     {"CS", "Driftsläge (laddningsregulator)"},
     {"ERR", "Felkod (laddningsregulator)"},
-    {"OR", "Av-orsak  (laddningsregulator)"},
-};
+    {"OR", "Av-orsak (laddningsregulator)"},
+    {"PID", "Produkt-ID"}};
