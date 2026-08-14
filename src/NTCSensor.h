@@ -45,7 +45,7 @@ public:
         digitalWrite(powerPin, LOW); // Start with power off
     }
 
-    std::optional<int> temperature()
+    std::optional<float> temperature()
     {
         digitalWrite(powerPin, HIGH); // Power on the sensor
         int samples = 0;
@@ -72,7 +72,7 @@ public:
         int roundedTemperature = round(temperature); // Round to int (sensor not that exact anyway)
 
         if (roundedTemperature > -200 && roundedTemperature < 200) // Return only reasonable temperatures
-            return roundedTemperature;
+            return temperature;
 
         eventLog.log("Orealistisk temperatur från NTC på pin " + String(readPin) + " (" + String(roundedTemperature) + "°C)", EventLogger::LogLevel::DATA);
         return std::nullopt;

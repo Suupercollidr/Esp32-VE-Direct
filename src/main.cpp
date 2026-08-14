@@ -368,12 +368,12 @@ Point houseStatsToInflux()
   Point houseStats("Huvudbyggnad");
   if (auto temperature = ntcSensor1.temperature(); temperature.has_value())
   {
-    houseStats.addField("Temp_kyl", temperature.value());
+    houseStats.addField("Temp_kyl_float", temperature.value());
     publishMqtt(topics.refrigeratorTemp, String(temperature.value()));
   }
   if (auto temperature = ntcSensor2.temperature(); temperature.has_value())
   {
-    houseStats.addField("Temp_frys", temperature.value());
+    houseStats.addField("Temp_frys_float", temperature.value());
   }
   houseStats.addField("Rumstemp_1", dhtSensorRoom.getTemperature());
   publishMqtt(topics.roomTemp, String(dhtSensorRoom.getTemperature()));
