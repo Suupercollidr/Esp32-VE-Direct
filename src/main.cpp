@@ -122,7 +122,15 @@ void setup()
   WiFi.begin(ssid, password);
 
   if (esp_now_init() != ESP_OK)
-    eventLog.log("ESP-NOW: Failed to initialize");
+    eventLog.log("ESP-NOW: Fel vid initializering");
+
+  esp_now_peer_info_t peerInfo = {};
+  memcpy(peerInfo.peer_addr, controlUnitMacAdress, 6);
+  peerInfo.channel = 0; // 0 = använd aktuell wifi-kanal
+  peerInfo.encrypt = false;
+
+  if (esp_now_add_peer(&peerInfo) != ESP_OK)
+    eventLog.log("ESP-NOW: Kunde inte lägga till styrenheten som peer", EventLogger::LogLevel::WARNING);
 
   while (!WiFi.isConnected())
   {
@@ -448,7 +456,6 @@ void publishMqtt(const String &topic, const String &payload, bool retain)
     return;
   mqttClient.publish(topic.c_str(), 0, retain, payload.c_str());
 }
-
 
 void sendDataToEspNow()
 {

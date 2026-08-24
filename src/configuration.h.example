@@ -3,39 +3,60 @@
 #include <esp_system.h>
 #include <Arduino.h>
 
-const char dataFileName[] = "/datalog.csv";
-const char logFileName[] = "/system.log";
+inline const char dataFileName[] = "/datalog2.csv";
+inline const char logFileName[] = "/system.log";
 
-const char *ssid = "ssid";
-const char *password = "WiFi password";
-const char *hostname = "ESP32 hostname";
+inline const char *ssid = "MyBestSSID";
+inline const char *password = "password";
+inline const char *hostname = "hostname"; 
+const int wifiTimeout = 120; //Seconds
 
-const char *otaUsername = "user name";
-const char *otaPassword = "password";
+inline const char *otaUsername = "user_name";
+inline const char *otaPassword = "password";
 
-const char *NTP_SERVER1 = "ntp1.sp.se";
-const char *NTP_SERVER2 = "ntp2.sp.se";
-const char *NTP_SERVER3 = "pool.ntp.org";
-const char *TIME_ZONE = "CET-1CEST-2,M3.5.0/02:00:00,M10.5.0/03:00:00";
-const int NTP_SYNC_INTERVAL = 6;   // hours
+inline const char *NTP_SERVER1 = "ntp1.sp.se";
+inline const char *NTP_SERVER2 = "ntp2.sp.se";
+inline const char *NTP_SERVER3 = "pool.ntp.org";
+inline const char *TIME_ZONE = "CET-1CEST-2,M3.5.0/02:00:00,M10.5.0/03:00:00";
+inline const int NTP_SYNC_INTERVAL = 6; // hours
 
 // IPAddress for DNS servers
-IPAddress primaryDNS(8,8,8,8);  
-IPAddress secondaryDNS(9,9,9,9);     
+inline IPAddress primaryDNS(192, 168, 0, 30); // Pi-hole DNS
+inline IPAddress secondaryDNS(9, 9, 9, 9);    // Quad9  DNS
 
-#define INFLUXDB_URL "http://influx-IP:8086"
-#define INFLUXDB_TOKEN "Influx token"
-#define INFLUXDB_ORG "Influx org"
-#define INFLUXDB_DATA_BUCKET "My bucket"
-#define INFLUXDB_LOG_BUCKET "My log bucket"
+#define INFLUXDB_URL "http://192.168.0.43:8086" // On VPN
+#define INFLUXDB_TOKEN "TOOOOKEN!"
+#define INFLUXDB_ORG "OrG-ID"
+#define INFLUXDB_DATA_BUCKET "It's pronounced Bucket"
+#define INFLUXDB_LOG_BUCKET "Log bucket"
 
-// MAC address for transmitting ESP32 (greenhouse)
-uint8_t transmitterMAC[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 
-const int UPDATE_INTERVAL = 5;     // How often to send data, in seconds
-const int INV_OFF_VOLTAGE = 11000; // mV
-const int INV_ON_VOLTAGE = 13000;  // mV
-const int INV_RETRY_PERIOD = 1800; // seconds
+// MAC address for the ESP32 that we send data to
+uint8_t controlUnitMacAdress[] = {0xXX, 0xXX, 0xXX, 0xXX, 0xXX, 0xXX};
+
+
+// MQTT
+inline const char *MQTT_HOST = "192.168.0.30";
+inline const char *MQTT_USER = "User_name";
+inline const char *MQTT_PASS = "Mote du passe";
+
+// MQTT topics
+struct MqttTopics
+{
+    const char *esp32_status_topic = "automation/kliimaministeerium/status";
+    const char *esp32_restart_topic = "automation/kliimaministeerium/restart";
+    const char *greenhouseIndoorTemp = "environment/greenhouse/indoor/temperature";
+    const char *greenhouseOutdoorTemp = "environment/greenhouse/outdoor/temperature";
+    const char *refrigeratorTemp = "environment/refrigerator/temperature";
+    const char *roomTemp = "environment/room/temperature";
+    const char *roomHumidity = "environment/room/humidity";
+};
+
+inline const int UPDATE_INTERVAL = 5;     // How often to send data, in seconds
+inline const int CTRL_ESP_UPDATE_INTERVAL = 10;     // How often to send data, in minutes
+inline const int INV_OFF_VOLTAGE = 11000; // mV
+inline const int INV_ON_VOLTAGE = 13000;  // mV
+inline const int INV_RETRY_PERIOD = 1800; // seconds
 
 // Define pins
 #define ONBOARD_BUTTON 0
@@ -45,6 +66,6 @@ const int INV_RETRY_PERIOD = 1800; // seconds
 #define RXD2 17
 #define TXD2 18
 #define DHT_PIN 4
-#define NTC1_READ_PIN 6 
+#define NTC1_READ_PIN 6
 #define NTC2_READ_PIN 7
 #define NTC_POWER_PIN 5 // (A4) 3.3V for the voltage divider
