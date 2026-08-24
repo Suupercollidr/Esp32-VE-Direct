@@ -1,5 +1,6 @@
 #include <esp_system.h>
 #include <esp_log.h>
+#include <esp_now.h>
 #include <Arduino.h>
 #include <optional>
 #include <WiFi.h>
@@ -14,11 +15,13 @@
 #include <DHTesp.h>
 #include "maputils.h"
 #include "debounce.h"
+#include "AmIOnline.h"
 #include "ReadEspNow.h"
 #include "nvsDebugData.h"
 #include "EventLogger.h"
 #include "mappings.h"
 #include "mappingsMqtt.h"
+#include "espNowTypdef.h"
 #include "NTCSensor.h"
 #include "VEDirectSerialReader.h"
 #include "VEDirectParseMessage.h"
@@ -55,6 +58,7 @@ ESPNowReceiver greenhouseData;
 Debounce WiFiConnectTimeout(30000); // Used for both intial connect and reconnect period
 Debounce NTPSyncInterval(NTP_SYNC_INTERVAL * 3600000);
 Debounce influxSendInterval(UPDATE_INTERVAL * 1000);
+Debounce sendToCtrlEspInterval(CTRL_ESP_UPDATE_INTERVAL * 60 * 1000);
 
 tm timeinfo;
 time_t now;
@@ -95,6 +99,7 @@ void greenhouseToMqtt(GreenhouseSensorData data);
 void publishMqtt(const String &topic,
                  const String &payload,
                  bool retain = false);
+void sendDataToEspNow();
 
 void setup()
 {
@@ -112,8 +117,12 @@ void setup()
 
   greenhouseData.begin();
 
+  WiFi.mode(WIFI_STA);
   WiFi.setHostname(hostname);
   WiFi.begin(ssid, password);
+
+  if (esp_now_init() != ESP_OK)
+    eventLog.log("ESP-NOW: Failed to initialize");
 
   while (!WiFi.isConnected())
   {
@@ -198,6 +207,9 @@ void loop()
 
   if (victronMppt.update())
     Serial.println("Tog emot ny data från MPPT");
+
+  if (sendToCtrlEspInterval.ready())
+    sendDataToEspNow();
 
   std::vector<Point> influxPoints;
 
@@ -435,4 +447,27 @@ void publishMqtt(const String &topic, const String &payload, bool retain)
   if (!mqttClient.connected())
     return;
   mqttClient.publish(topic.c_str(), 0, retain, payload.c_str());
+}
+
+
+void sendDataToEspNow()
+{
+  storeDataToNvs("lastState", "sendDataToEspNow");
+
+  ControlUnitData outData{}; // nollställd som default
+
+  if (auto temperature = ntcSensor1.temperature(); temperature.has_value())
+    outData.refrigeratorTemp = static_cast<int>(temperature.value() * 10);
+
+  const auto &mpptIntData = mpptData.getIntMap();
+
+  if (mpptIntData.count("V"))
+    outData.mpptV = mpptIntData.at("V");
+
+  if (mpptIntData.count("VPV"))
+    outData.mpptVPV = mpptIntData.at("VPV");
+
+  esp_err_t result = esp_now_send(controlUnitMacAdress, (uint8_t *)&outData, sizeof(outData));
+  if (result != ESP_OK)
+    eventLog.log("ESP-NOW: Misslyckades med att skicka data till styrenheten", EventLogger::LogLevel::WARNING);
 }
