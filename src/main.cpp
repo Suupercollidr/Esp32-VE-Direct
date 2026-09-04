@@ -88,14 +88,14 @@ void sendHouseToInflux();
 Point greenhouseToInflux(GreenhouseSensorData data);
 Point sysStatsToInflux();
 Point houseStatsToInflux();
-Point veToInflux(String pointName,
-                 VEDirectParseMessage parsedMessage,
-                 std::map<String, int> conversionFactors,
-                 std::map<String, String> displayNames,
-                 CodeMap codes);
-void veToMqtt(VEDirectParseMessage parsedMessage,
-              std::map<String, int> conversionFactors,
-              const std::map<String, String> mqttTopics);
+Point veToInflux(const String &pointName,
+                 const VEDirectParseMessage &parsedMessage,
+                 const std::map<String, int> &conversionFactors,
+                 const std::map<String, String> &displayNames,
+                 const CodeMap &codes);
+void veToMqtt(const VEDirectParseMessage &parsedMessage,
+              const std::map<String, int> &conversionFactors,
+              const std::map<String, String> &mqttTopics);
 void greenhouseToMqtt(GreenhouseSensorData data);
 void publishMqtt(const String &topic,
                  const String &payload,
@@ -409,7 +409,11 @@ Point houseStatsToInflux()
   return houseStats;
 }
 
-Point veToInflux(String pointName, VEDirectParseMessage parsedMessage, std::map<String, int> conversionFactors, std::map<String, String> displayNames, CodeMap codes)
+Point veToInflux(const String &pointName,
+                 const VEDirectParseMessage &parsedMessage,
+                 const std::map<String, int> &conversionFactors,
+                 const std::map<String, String> &displayNames,
+                 const CodeMap &codes)
 {
   String action = "veToInflux: " + pointName;
   storeDataToNvs("lastState", action.c_str());
@@ -439,9 +443,9 @@ Point veToInflux(String pointName, VEDirectParseMessage parsedMessage, std::map<
   return newPoint;
 }
 
-void veToMqtt(VEDirectParseMessage parsedMessage,
-              std::map<String, int> conversionFactors,
-              const std::map<String, String> mqttTopics)
+void veToMqtt(const VEDirectParseMessage &parsedMessage,
+              const std::map<String, int> &conversionFactors,
+              const std::map<String, String> &mqttTopics)
 {
   const auto &intData = parsedMessage.getIntMap();
   for (auto const &[key, val] : intData)

@@ -24,9 +24,6 @@ void VEDirectSerialReader::copySerialBufferToRingBuffer()
 
         if (RingBufferWritePos >= BUFFER_SIZE)
             RingBufferWritePos = 0;
-
-        if (!serial.available())
-            delay(1); // Give device a chance to finish
     }
 }
 
@@ -55,7 +52,7 @@ int VEDirectSerialReader::searchChecksumBackwards(const char *buffer, int head, 
         current = (current - 1 + bufferSize) % bufferSize;
     }
 
-    Serial.println("Hittade inte \"" + String(word) + "\"");
+    //Serial.println("Hittade inte \"" + String(word) + "\"");
     return -1; // Returnera -1 om ingen match hittas
 }
 
@@ -119,18 +116,15 @@ bool VEDirectSerialReader::update()
 
     int endPos = searchChecksumBackwards(ringBuffer, RingBufferWritePos, endOfMessage);
     if (endPos == -1)
-    {
-        Serial.println("Hittar inget meddelandeslut");
-        Serial.flush();
         return false;
-    }
+
     end = (endPos + strlen(endOfMessage) + 1) % BUFFER_SIZE;
 
     int searchStartPos = (endPos - 1 + BUFFER_SIZE) % BUFFER_SIZE;
     int startPos = searchChecksumBackwards(ringBuffer, searchStartPos, endOfMessage);
 
     if (startPos < 0 || startPos == endPos) // If only find one endOfMessage, assume there is exactly 1 message at the start of the buffer
-        start = 0;
+        return false;
     else
         start = (startPos + strlen(endOfMessage) + 1) % BUFFER_SIZE;
 
@@ -145,7 +139,7 @@ bool VEDirectSerialReader::update()
 
     // Filtrera bort HEX-rader
     size_t filteredLength = filterHexLines(message, length);
-    if (filteredLength == 0)     // Inget kvar efter filtrering
+    if (filteredLength == 0) // Inget kvar efter filtrering
     {
         delete[] message;
         return false;

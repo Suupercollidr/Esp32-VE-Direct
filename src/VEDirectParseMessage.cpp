@@ -1,6 +1,5 @@
 #include "VEDirectParseMessage.h"
 
-
 VEDirectParseMessage::VEDirectParseMessage()
 {
 }
@@ -44,6 +43,9 @@ void VEDirectParseMessage::parseMessage(const String &message)
 
 void VEDirectParseMessage::storeField(const String &label, const String &value)
 {
+    if (label == "Checksum")
+        return;
+        
     if (isInt(value))
         numData[label] = value.toInt();
     else

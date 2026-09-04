@@ -24,7 +24,7 @@ private:
     char ringBuffer[BUFFER_SIZE] = {0};
     size_t RingBufferWritePos = 0;
 
-    char *lastMessage;
+    char *lastMessage = nullptr;
     size_t lastMessageLength = 0;
 
     const char *endOfMessage = "Checksum\t";
