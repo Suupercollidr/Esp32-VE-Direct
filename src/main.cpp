@@ -449,11 +449,14 @@ void veToMqtt(VEDirectParseMessage parsedMessage,
     if (!mqttTopics.count(key))
       continue;
 
-    float floatVal = conversionFactors.count(key)
-                         ? static_cast<float>(val) / conversionFactors.at(key)
-                         : static_cast<float>(val);
+    String strVal;
 
-    publishMqtt(mqttTopics.at(key), String(floatVal, 2));
+    if (conversionFactors.count(key))
+      strVal = String((static_cast<float>(val) / conversionFactors.at(key)), 2);
+    else
+      strVal = String(val);
+
+    publishMqtt(mqttTopics.at(key), strVal);
   }
 }
 
