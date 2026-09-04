@@ -56,7 +56,7 @@ ESPNowReceiver greenhouseData;
 
 Debounce WiFiConnectTimeout(30000); // Used for both intial connect and reconnect period
 Debounce NTPSyncInterval(NTP_SYNC_INTERVAL * 3600000);
-Debounce influxSendInterval(UPDATE_INTERVAL * 1000);
+Debounce publishDataInverval(UPDATE_INTERVAL * 1000);
 Debounce controlFridgeInterval(CTRL_FRIDGE_INTERVAL * 60 * 1000);
 
 tm timeinfo;
@@ -213,11 +213,15 @@ void loop()
   ElegantOTA.loop();
 
   if (victronInverter.update())
+  {
+    inverterData.stringToMap(victronInverter.getMessage());
     Serial.println("Tog emot ny data från inverter");
+  }
 
   if (victronMppt.update())
   {
     whatToDoWithInverter = shouldInverterBeOn();
+    mpptData.stringToMap(victronMppt.getMessage());
     Serial.println("Tog emot ny data från MPPT");
   }
 
@@ -229,13 +233,10 @@ void loop()
   std::vector<Point> influxPoints;
 
   // Send data at regular intervals
-  if (influxSendInterval.ready())
+  if (publishDataInverval.ready())
   {
     Serial.println("\nSamlar ihop och skickar data till Influx");
     storeDataToNvs("lastState", "Send data triggered");
-
-    inverterData.stringToMap(victronInverter.getMessage());
-    mpptData.stringToMap(victronMppt.getMessage());
 
     // Victron VE.Direct units
     if (!inverterData.getIntMap().empty())
@@ -243,8 +244,8 @@ void loop()
       influxPoints.emplace_back(veToInflux("Inverter", inverterData, inverterConversions, inverterDisplayNames, inverterCodes));
       veToMqtt(inverterData, inverterConversions, inverterMqttMappings);
     }
-    const auto &mpptDataMap = mpptData.getIntMap();
-    if (!mpptDataMap.empty())
+
+    if (!mpptData.getIntMap().empty())
     {
       influxPoints.emplace_back(veToInflux("MPPT", mpptData, mpptConversions, mpptDisplayNames, mpptCodes));
       veToMqtt(mpptData, mpptConversions, mpptMqttMappings);
