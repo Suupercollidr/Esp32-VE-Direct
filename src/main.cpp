@@ -36,6 +36,10 @@ InfluxDBClient influxLogClient(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_LOG_BUCKET, 
 Debounce influxVerifyTimer(60000);
 uint8_t influxFailedAttempts = 0;
 
+volatile bool hasConnectionProblem = true;
+volatile bool connectionProblemIsNew = false;
+Debounce connectionProblemsTimeout(30 * 60 * 1000); // half an hour
+
 AsyncMqttClient mqttClient;
 MqttTopics topics;
 Debounce MQTTReconnect(10000);
@@ -205,6 +209,22 @@ void loop()
       ESP.restart();
     }
   }
+  
+  if (hasConnectionProblem)
+  {
+    if (connectionProblemIsNew)
+    {
+      connectionProblemsTimeout.reset();
+      connectionProblemIsNew = false;
+    }
+    
+    if (connectionProblemsTimeout.ready())
+    {
+      storeDataToNvs("lastState", "MQTT connection down");
+      delay(200);
+      ESP.restart();
+    }
+  }
 
   if (!mqttClient.connected())
     reconnectMqtt();
@@ -312,6 +332,9 @@ void reconnectMqtt()
 
 void onMqttConnect(bool sessionPresent)
 {
+  hasConnectionProblem = false;
+  connectionProblemIsNew = true;
+
   mqttClient.publish(topics.esp32_status_topic, 1, true, "online");
   uint16_t packetId = mqttClient.subscribe(topics.esp32_restart_topic, 1);
 
@@ -320,6 +343,8 @@ void onMqttConnect(bool sessionPresent)
 
 void onMqttDisconnect(AsyncMqttClientDisconnectReason reason)
 {
+  hasConnectionProblem = true;
+
   String message = "Frånkopplad från MQTT-broker p.g.a.: ";
   message += static_cast<int>(reason);
   eventLog.log(message, EventLogger::LogLevel::WARNING);
@@ -490,7 +515,7 @@ InverterAction shouldInverterBeOn()
   if (batteryVoltage < INV_OFF_VOLTAGE) // Battery voltage very low, turn off
     return InverterAction::TURN_OFF;
 
-  if (batteryVoltage > 12000 && panelVoltage > 30000) // Sun is up, so probably OK to turn on at lower voltage
+  if (batteryVoltage > INV_ACCEPTABLE_VOLTAGE && panelVoltage > PANEL_CHARGE_VOLTAGE) // Sun is up, so probably OK to turn on at lower voltage
     return InverterAction::TURN_ON;
 
   return InverterAction::NO_CHANGE;
