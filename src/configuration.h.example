@@ -53,7 +53,7 @@ struct MqttTopics
 };
 
 inline const int UPDATE_INTERVAL = 5;     // How often to send data, in seconds
-inline const int CTRL_ESP_UPDATE_INTERVAL = 10;     // How often to send data, in minutes
+inline const int CTRL_FRIDGE_INTERVAL = 10;     // How often to send data, in minutes
 inline const int INV_OFF_VOLTAGE = 11000; // mV
 inline const int INV_ON_VOLTAGE = 13000;  // mV
 inline const int INV_RETRY_PERIOD = 1800; // seconds

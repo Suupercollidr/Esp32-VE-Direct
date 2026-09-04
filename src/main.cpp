@@ -15,7 +15,6 @@
 #include <DHTesp.h>
 #include "maputils.h"
 #include "debounce.h"
-#include "AmIOnline.h"
 #include "ReadEspNow.h"
 #include "nvsDebugData.h"
 #include "EventLogger.h"
@@ -58,10 +57,12 @@ ESPNowReceiver greenhouseData;
 Debounce WiFiConnectTimeout(30000); // Used for both intial connect and reconnect period
 Debounce NTPSyncInterval(NTP_SYNC_INTERVAL * 3600000);
 Debounce influxSendInterval(UPDATE_INTERVAL * 1000);
-Debounce sendToCtrlEspInterval(CTRL_ESP_UPDATE_INTERVAL * 60 * 1000);
+Debounce controlFridgeInterval(CTRL_FRIDGE_INTERVAL * 60 * 1000);
 
 tm timeinfo;
 time_t now;
+
+InverterAction whatToDoWithInverter = InverterAction::NO_CHANGE;
 
 /*
 According to VE.Direct documentation, these are the maximum sizes:
@@ -99,7 +100,8 @@ void greenhouseToMqtt(GreenhouseSensorData data);
 void publishMqtt(const String &topic,
                  const String &payload,
                  bool retain = false);
-void sendDataToEspNow();
+InverterAction shouldInverterBeOn();
+void sendInverterCommandViaEspNow(InverterAction action);
 
 void setup()
 {
@@ -214,11 +216,16 @@ void loop()
     Serial.println("Tog emot ny data från inverter");
 
   if (victronMppt.update())
+  {
+    whatToDoWithInverter = shouldInverterBeOn();
     Serial.println("Tog emot ny data från MPPT");
+  }
 
-  if (sendToCtrlEspInterval.ready())
-    sendDataToEspNow();
-
+  if (controlFridgeInterval.ready() && whatToDoWithInverter != InverterAction::NO_CHANGE)
+  {
+    sendInverterCommandViaEspNow(whatToDoWithInverter);
+    whatToDoWithInverter = InverterAction::NO_CHANGE;
+  }
   std::vector<Point> influxPoints;
 
   // Send data at regular intervals
@@ -457,24 +464,38 @@ void publishMqtt(const String &topic, const String &payload, bool retain)
   mqttClient.publish(topic.c_str(), 0, retain, payload.c_str());
 }
 
-void sendDataToEspNow()
+InverterAction shouldInverterBeOn()
 {
-  storeDataToNvs("lastState", "sendDataToEspNow");
-
-  ControlUnitData outData{}; // nollställd som default
-
-  if (auto temperature = ntcSensor1.temperature(); temperature.has_value())
-    outData.refrigeratorTemp = static_cast<int>(temperature.value() * 10);
-
   const auto &mpptIntData = mpptData.getIntMap();
+  bool hasBatteryVoltage = mpptIntData.count("V");
+  bool hasPanelVoltage = mpptIntData.count("VPV");
 
-  if (mpptIntData.count("V"))
-    outData.mpptV = mpptIntData.at("V");
+  if (!hasBatteryVoltage)
+    return InverterAction::NO_CHANGE;
 
-  if (mpptIntData.count("VPV"))
-    outData.mpptVPV = mpptIntData.at("VPV");
+  int batteryVoltage = mpptIntData.at("V");
+  int panelVoltage = hasPanelVoltage ? mpptIntData.at("VPV") : -1;
 
-  esp_err_t result = esp_now_send(controlUnitMacAdress, (uint8_t *)&outData, sizeof(outData));
+  if (batteryVoltage > INV_ON_VOLTAGE) // Battery voltage OK, turn on
+    return InverterAction::TURN_ON;
+
+  if (batteryVoltage < INV_OFF_VOLTAGE) // Battery voltage very low, turn off
+    return InverterAction::TURN_OFF;
+
+  if (batteryVoltage > 12000 && panelVoltage > 30000) // Sun is up, so probably OK to turn on at lower voltage
+    return InverterAction::TURN_ON;
+
+  return InverterAction::NO_CHANGE;
+}
+
+void sendInverterCommandViaEspNow(InverterAction action)
+{
+  storeDataToNvs("lastState", "sendInverterCommandViaEspNow");
+
+  InverterMessage message;
+  message.action = action;
+
+  esp_err_t result = esp_now_send(controlUnitMacAdress, (uint8_t *)&message, sizeof(message));
   if (result != ESP_OK)
     eventLog.log("ESP-NOW: Misslyckades med att skicka data till styrenheten", EventLogger::LogLevel::WARNING);
 }
