@@ -146,7 +146,7 @@ const CodeMap mpptCodes{
          {4, "Absorbtion"},
          {5, "Float"},
          {7, "Utjämna (manuell)"},
-         {254, "Startar"},
+         {245, "Startar"},
          {247, "Auto-utjämning"},
          {252, "Extern styrning"},
      }},
