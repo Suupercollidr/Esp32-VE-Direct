@@ -11,7 +11,6 @@
 #include <map>
 #include "maputils.h"
 
-
 const std::map<String, int> inverterConversions{
     {"V", 1000},       // Batterispänning (växelriktare), V
     {"AC_OUT_S", 1},   // Effekt växelström, VA
@@ -47,6 +46,7 @@ const CodeMap inverterCodes{
     {"WARN",
      {
          {0, "Inget fel"},
+         {1, "Låg spänning"},
          {2, "Batterispänning för hög"},
          {17, "Laddaren för varm"},
          {18, "Överström i laddaren"},
@@ -98,8 +98,7 @@ const std::map<String, String> inverterDisplayNames{
     {"OR", "Av-orsak  (växelriktare)"},
     {"AR", "Larmorsak (växelriktare)"},
     {"WARN", "Felorsak (växelriktare)"},
-    {"PID", "Produkt-ID"}
-};
+    {"PID", "Produkt-ID"}};
 
 const std::map<String, int> mpptConversions{
     {"PPV", 1},    // Paneleffekt, W
