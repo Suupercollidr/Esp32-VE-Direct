@@ -136,7 +136,7 @@ std::vector<int> VEDirectDecoder::findCombination(
     // Not an exact match, fail safely
     if (remaining != 0)
     {
-        eventLog.log(String("Failed to find error codes in " + value), EventLogger::LogLevel::DATA);
+        eventLog.log(String("Failed to find error codes in ") + value, EventLogger::LogLevel::DATA);
         return {};
     }
     return result;

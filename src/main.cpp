@@ -209,7 +209,7 @@ void loop()
       ESP.restart();
     }
   }
-  
+
   if (hasConnectionProblem)
   {
     if (connectionProblemIsNew)
@@ -217,7 +217,7 @@ void loop()
       connectionProblemsTimeout.reset();
       connectionProblemIsNew = false;
     }
-    
+
     if (connectionProblemsTimeout.ready())
     {
       storeDataToNvs("lastState", "MQTT connection down");
@@ -320,6 +320,8 @@ void loop()
 
 void reconnectMqtt()
 {
+  storeDataToNvs("lastState", "reconnectMqtt");
+
   if (!MQTTReconnect.ready())
     return;
 
@@ -332,6 +334,8 @@ void reconnectMqtt()
 
 void onMqttConnect(bool sessionPresent)
 {
+  storeDataToNvs("lastState", "onMqttConnect");
+
   hasConnectionProblem = false;
   connectionProblemIsNew = true;
 
@@ -343,6 +347,7 @@ void onMqttConnect(bool sessionPresent)
 
 void onMqttDisconnect(AsyncMqttClientDisconnectReason reason)
 {
+  storeDataToNvs("lastState", "onMqttDisconnect");
   hasConnectionProblem = true;
 
   String message = "Frånkopplad från MQTT-broker p.g.a.: ";
@@ -356,6 +361,7 @@ void onMqttDisconnect(AsyncMqttClientDisconnectReason reason)
 void onMqttMessage(char *topic, char *payload, AsyncMqttClientMessageProperties properties,
                    size_t len, size_t index, size_t total)
 {
+  storeDataToNvs("lastState", "onMqttMessage");
   if (strcmp(topic, topics.esp32_restart_topic) != 0)
     return;
 
@@ -395,6 +401,7 @@ Point greenhouseToInflux(GreenhouseSensorData data)
 
 void greenhouseToMqtt(GreenhouseSensorData data)
 {
+  storeDataToNvs("lastState", "greenhouseToMqtt");
   publishMqtt(String(topics.greenhouseIndoorTemp), String((data.indoorTemp / 10.0)));
   publishMqtt(String(topics.greenhouseOutdoorTemp), String((data.outdoorTemp / 10.0)));
 }
@@ -473,6 +480,7 @@ void veToMqtt(const VEDirectParseMessage &parsedMessage,
               const std::map<String, int> &conversionFactors,
               const std::map<String, String> &mqttTopics)
 {
+  storeDataToNvs("lastState", "veToMqtt");
   const auto &intData = parsedMessage.getIntMap();
   for (auto const &[key, val] : intData)
   {
@@ -492,6 +500,8 @@ void veToMqtt(const VEDirectParseMessage &parsedMessage,
 
 void publishMqtt(const String &topic, const String &payload, bool retain)
 {
+  storeDataToNvs("lastState", "publishMqtt");
+
   if (!mqttClient.connected())
     return;
   mqttClient.publish(topic.c_str(), 0, retain, payload.c_str());
@@ -499,6 +509,7 @@ void publishMqtt(const String &topic, const String &payload, bool retain)
 
 InverterAction shouldInverterBeOn()
 {
+  storeDataToNvs("lastState", "shouldInverterBeOn");
   const auto &mpptIntData = mpptData.getIntMap();
   bool hasBatteryVoltage = mpptIntData.count("V");
   bool hasPanelVoltage = mpptIntData.count("VPV");
