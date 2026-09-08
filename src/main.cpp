@@ -61,7 +61,7 @@ ESPNowReceiver greenhouseData;
 Debounce WiFiConnectTimeout(30000); // Used for both intial connect and reconnect period
 Debounce NTPSyncInterval(NTP_SYNC_INTERVAL * 3600000);
 Debounce publishDataInverval(UPDATE_INTERVAL * 1000);
-Debounce controlFridgeInterval(CTRL_FRIDGE_INTERVAL * 60 * 1000);
+Debounce sendFridgeCommand(UPDATE_INTERVAL * 1000);
 
 tm timeinfo;
 time_t now;
@@ -105,7 +105,7 @@ void publishMqtt(const String &topic,
                  const String &payload,
                  bool retain = false);
 InverterAction shouldInverterBeOn();
-void sendInverterCommandViaEspNow(InverterAction action);
+bool sendInverterCommandViaEspNow(InverterAction action);
 
 void setup()
 {
@@ -245,11 +245,12 @@ void loop()
     Serial.println("Tog emot ny data från MPPT");
   }
 
-  if (controlFridgeInterval.ready() && whatToDoWithInverter != InverterAction::NO_CHANGE)
+  if (sendFridgeCommand.ready() && whatToDoWithInverter != InverterAction::NO_CHANGE)
   {
-    sendInverterCommandViaEspNow(whatToDoWithInverter);
-    whatToDoWithInverter = InverterAction::NO_CHANGE;
+    if (sendInverterCommandViaEspNow(whatToDoWithInverter))
+      whatToDoWithInverter = InverterAction::NO_CHANGE;
   }
+
   std::vector<Point> influxPoints;
 
   // Send data at regular intervals
@@ -532,7 +533,7 @@ InverterAction shouldInverterBeOn()
   return InverterAction::NO_CHANGE;
 }
 
-void sendInverterCommandViaEspNow(InverterAction action)
+bool sendInverterCommandViaEspNow(InverterAction action)
 {
   storeDataToNvs("lastState", "sendInverterCommandViaEspNow");
 
@@ -542,4 +543,6 @@ void sendInverterCommandViaEspNow(InverterAction action)
   esp_err_t result = esp_now_send(controlUnitMacAdress, (uint8_t *)&message, sizeof(message));
   if (result != ESP_OK)
     eventLog.log("ESP-NOW: Misslyckades med att skicka data till styrenheten", EventLogger::LogLevel::WARNING);
+
+  return result == ESP_OK;
 }
