@@ -234,6 +234,7 @@ void loop()
 
   localWebServer.handleClient();
   ElegantOTA.loop();
+  eventLog.maintain();
 
   if (victronInverter.update())
   {
@@ -251,8 +252,22 @@ void loop()
   if (sendFridgeCommand.ready())
   {
     bool inverterCommandSent = sendInverterCommandViaEspNow(whatToDoWithInverter);
-    String logMessage = inverterCommandSent ? String("Skickade kommando till inverter: ") + (whatToDoWithInverter == InverterAction::TURN_ON ? "TURN_ON" : "TURN_OFF") : "Misslyckades med att skicka kommando till inverter";
-    eventLog.log(logMessage, EventLogger::LogLevel::INFO);
+
+    switch (whatToDoWithInverter)
+    {
+    case InverterAction::TURN_ON:
+      eventLog.log("Skickar kommando till inverter: TURN_ON", EventLogger::LogLevel::INFO);
+      break;
+    case InverterAction::TURN_OFF:
+      eventLog.log("Skickar kommando till inverter: TURN_OFF", EventLogger::LogLevel::INFO);
+      break;
+    case InverterAction::NO_CHANGE:
+      eventLog.log("Ingen åtgärd för invertern", EventLogger::LogLevel::INFO);
+      break;
+    }
+
+    if (!inverterCommandSent)
+      eventLog.log("Misslyckades med att skicka kommando till inverter", EventLogger::LogLevel::ERROR);
   }
 
   std::vector<Point> influxPoints;
