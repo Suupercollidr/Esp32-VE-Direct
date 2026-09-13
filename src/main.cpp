@@ -39,6 +39,7 @@ uint8_t influxFailedAttempts = 0;
 volatile bool hasConnectionProblem = true;
 volatile bool connectionProblemIsNew = false;
 Debounce connectionProblemsTimeout(30 * 60 * 1000); // half an hour
+volatile bool mqttRestartCommandReceived = false;
 
 AsyncMqttClient mqttClient;
 MqttTopics topics;
@@ -108,6 +109,7 @@ void publishMqtt(const String &topic,
                  bool retain = false);
 InverterAction shouldInverterBeOn();
 bool sendInverterCommandViaEspNow(InverterAction action);
+void mqttToldMeToReboot();
 
 void setup()
 {
@@ -128,6 +130,8 @@ void setup()
   WiFi.mode(WIFI_STA);
   WiFi.setHostname(hostname);
   WiFi.begin(ssid, password);
+
+  eventLog.begin();
 
   if (esp_now_init() != ESP_OK)
     eventLog.log("ESP-NOW: Fel vid initializering");
@@ -167,8 +171,10 @@ void setup()
 
   // OTA
   localWebServer.on("/", []()
-                    { String websiteContents = "Tere tulemast Eesti saatkonda!\nJaotis: " + String(hostname);
+                    { String websiteContents = "Tere tulemast Eesti saatkonda!\nJaotis: " + String(hostname)
+                      + "\nBuild: " __DATE__ " " __TIME__;
     localWebServer.send(200, "text/plain", websiteContents); });
+
   ElegantOTA.setAuth(otaUsername, otaPassword);
   ElegantOTA.begin(&localWebServer);
   localWebServer.begin();
@@ -229,8 +235,10 @@ void loop()
     }
   }
 
-  if (!mqttClient.connected())
+  /*
+  if (!mqttClient.connected() && millis() > 60000)
     reconnectMqtt();
+  */
 
   localWebServer.handleClient();
   ElegantOTA.loop();
@@ -335,6 +343,9 @@ void loop()
     }
   }
 
+  if (mqttRestartCommandReceived)
+    mqttToldMeToReboot();
+
   yield();
 }
 
@@ -389,11 +400,7 @@ void onMqttMessage(char *topic, char *payload, AsyncMqttClientMessageProperties 
       message += (char)payload[i];
 
     if (message == "RESTART")
-    {
-      eventLog.log("Startar om på begäran från MQTT", EventLogger::LogLevel::INFO);
-      delay(1000);
-      ESP.restart();
-    }
+      mqttRestartCommandReceived = true;
   }
 }
 
@@ -564,4 +571,12 @@ bool sendInverterCommandViaEspNow(InverterAction action)
     eventLog.log("ESP-NOW: Misslyckades med att skicka data till styrenheten", EventLogger::LogLevel::WARNING);
 
   return result == ESP_OK;
+}
+void mqttToldMeToReboot()
+{
+  storeDataToNvs("lastState", "mqttRestartCommand");
+  mqttRestartCommandReceived = false;
+  eventLog.log("Startar om på begäran från MQTT", EventLogger::LogLevel::INFO);
+  delay(1000);
+  ESP.restart();
 }
