@@ -359,7 +359,7 @@ void reconnectMqtt()
   if (!WiFi.isConnected()) // Need WiFi to connect to MQTT broker
     return;
 
-  eventLog.log("Försöker återansluta till MQTT...", EventLogger::LogLevel::INFO);
+  eventLog.logAsync("Försöker återansluta till MQTT...", EventLogger::LogLevel::INFO);
   mqttClient.connect();
 }
 
@@ -373,7 +373,7 @@ void onMqttConnect(bool sessionPresent)
   mqttClient.publish(topics.esp32_status_topic, 1, true, "online");
   uint16_t packetId = mqttClient.subscribe(topics.esp32_restart_topic, 1);
 
-  eventLog.log("MQTT: Ansluten till broker", EventLogger::LogLevel::INFO);
+  eventLog.logAsync("MQTT: Ansluten till broker", EventLogger::LogLevel::INFO);
 }
 
 void onMqttDisconnect(AsyncMqttClientDisconnectReason reason)
@@ -383,7 +383,7 @@ void onMqttDisconnect(AsyncMqttClientDisconnectReason reason)
 
   String message = "Frånkopplad från MQTT-broker p.g.a.: ";
   message += static_cast<int>(reason);
-  eventLog.log(message, EventLogger::LogLevel::WARNING);
+  eventLog.logAsync(message, EventLogger::LogLevel::WARNING);
 
   if (reason != AsyncMqttClientDisconnectReason::MQTT_NOT_AUTHORIZED)
     reconnectMqtt();
