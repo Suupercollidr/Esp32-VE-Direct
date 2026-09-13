@@ -87,6 +87,8 @@ const char *getResetReason(esp_reset_reason_t);
 void reconnectMqtt();
 void onMqttConnect(bool sessionPresent);
 void onMqttDisconnect(AsyncMqttClientDisconnectReason reason);
+void onMqttMessage(char *topic, char *payload, AsyncMqttClientMessageProperties properties,
+                   size_t len, size_t index, size_t total);
 bool collectSensorData();
 void sendHouseToInflux();
 Point greenhouseToInflux(GreenhouseSensorData data);
@@ -177,6 +179,7 @@ void setup()
 
   mqttClient.onConnect(onMqttConnect);
   mqttClient.onDisconnect(onMqttDisconnect);
+  mqttClient.onMessage(onMqttMessage);
   mqttClient.setCredentials(MQTT_USER, MQTT_PASS);
   mqttClient.setServer(MQTT_HOST, 1883);
   mqttClient.setWill(topics.esp32_status_topic, 1, true, "offline");
@@ -245,10 +248,11 @@ void loop()
     Serial.println("Tog emot ny data från MPPT");
   }
 
-  if (sendFridgeCommand.ready() && whatToDoWithInverter != InverterAction::NO_CHANGE)
+  if (sendFridgeCommand.ready())
   {
-    if (sendInverterCommandViaEspNow(whatToDoWithInverter))
-      whatToDoWithInverter = InverterAction::NO_CHANGE;
+    bool inverterCommandSent = sendInverterCommandViaEspNow(whatToDoWithInverter);
+    String logMessage = inverterCommandSent ? String("Skickade kommando till inverter: ") + (whatToDoWithInverter == InverterAction::TURN_ON ? "TURN_ON" : "TURN_OFF") : "Misslyckades med att skicka kommando till inverter";
+    eventLog.log(logMessage, EventLogger::LogLevel::INFO);
   }
 
   std::vector<Point> influxPoints;
@@ -363,18 +367,18 @@ void onMqttMessage(char *topic, char *payload, AsyncMqttClientMessageProperties 
                    size_t len, size_t index, size_t total)
 {
   storeDataToNvs("lastState", "onMqttMessage");
-  if (strcmp(topic, topics.esp32_restart_topic) != 0)
-    return;
-
-  String message;
-  for (size_t i = 0; i < len; i++)
-    message += (char)payload[i];
-
-  if (message == "RESTART")
+  if (strcmp(topic, topics.esp32_restart_topic) == 0)
   {
-    eventLog.log("Startar om på begäran från MQTT", EventLogger::LogLevel::INFO);
-    delay(1000);
-    ESP.restart();
+    String message;
+    for (size_t i = 0; i < len; i++)
+      message += (char)payload[i];
+
+    if (message == "RESTART")
+    {
+      eventLog.log("Startar om på begäran från MQTT", EventLogger::LogLevel::INFO);
+      delay(1000);
+      ESP.restart();
+    }
   }
 }
 
